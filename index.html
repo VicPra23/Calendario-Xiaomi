@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendario Training</title>
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Calendario Training" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#ff6900" />
+  <link rel="stylesheet" href="styles.css?v=26" />
+  <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="brand">
+        <span class="brand-logo" aria-label="Xiaomi">
+          <svg viewBox="0 0 100 100" width="36" height="36" role="img" aria-label="Logo Xiaomi">
+            <path d="M50,0 C87,0 100,13 100,50 C100,87 87,100 50,100 C13,100 0,87 0,50 C0,13 13,0 50,0 Z" fill="#ff6900"/>
+            <path d="M22,70 V30 H48 C56,30 60,34 60,42 V70 H51 V43 C51,39 49,38 45,38 H31 V70 Z M38,47 H46 V70 H38 Z M67,30 H76 V70 H67 Z" fill="#ffffff"/>
+          </svg>
+        </span>
+        <h1 id="calendarTitle">Calendario Training</h1>
+      </div>
+    </div>
+
+    <div class="topbar-controls">
+      <div class="week-nav">
+        <button id="btnPrevWeek" class="btn btn-secondary" title="Semana anterior">◀</button>
+        <button id="btnToday" class="btn btn-secondary">Hoy</button>
+        <button id="btnNextWeek" class="btn btn-secondary" title="Semana siguiente">▶</button>
+        <div class="date-inline-group" title="Año / Mes / Semana">
+          <select id="selectYear" class="select-inline" title="Año"></select>
+          <span class="date-sep">/</span>
+          <select id="selectMonth" class="select-inline" title="Mes"></select>
+          <span class="date-sep">/</span>
+          <select id="selectWeek" class="select-inline" title="Semana"></select>
+        </div>
+      </div>
+
+      <div class="filters">
+        <div class="multi-filter" id="memberMultiFilter">
+          <button type="button" id="btnFilterMembers" class="select-filter multi-filter-btn" title="Filtrar por una o varias personas">
+            Todo el equipo ▾
+          </button>
+          <div id="memberFilterMenu" class="multi-filter-menu hidden"></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="btnToggleView" class="btn btn-secondary" title="Cambiar entre vista tabla y vista móvil">📱 Vista</button>
+        <button id="btnUndo" class="btn btn-secondary hidden" title="Deshacer último cambio">↶ Deshacer</button>
+        <button id="btnTeam" class="btn btn-secondary">👥 Equipo</button>
+        <button id="btnExportIcs" class="btn btn-secondary" title="Descargar eventos de la vista en .ICS">⬇ .ICS</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Leyenda de Canales (idéntica al estilo del Google Sheet original) -->
+  <section class="legend-wrapper" aria-label="Leyenda de canales">
+    <div class="legend-grid">
+      <div class="legend-title">Canales</div>
+      <div class="legend-items" id="legendItems"></div>
+    </div>
+  </section>
+
+  <!-- Cuadrícula Semanal (manteniendo el estilo del Calendario Training) -->
+  <main class="main-content">
+    <div id="weeksContainer" class="weeks-container"></div>
+  </main>
+
+  <!-- Modal: Crear / Editar Evento -->
+  <dialog id="eventModal" class="modal">
+    <form id="eventForm" class="modal-card">
+      <div class="modal-header">
+        <h2 id="eventModalTitle">Nuevo evento</h2>
+        <button type="button" class="btn-icon" data-close="eventModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="evId" />
+        <input type="hidden" id="evGoogleId" />
+        <input type="hidden" id="evGoogleCalId" />
+
+        <div id="evContextBadge" class="context-badge hidden">
+          <span id="evContextText"></span>
+          <button type="button" id="btnChangeContext" class="link-btn">Cambiar</button>
+        </div>
+
+        <div class="form-row">
+          <label>Título / Actividad *
+            <input type="text" id="evTitle" required placeholder="Ej: MADRID / ECI ALCALÁ / REFUERZO PR Y X18" />
+          </label>
+        </div>
+
+        <div id="evMemberDateRow" class="form-grid-2">
+          <label>Persona / Rol *
+            <select id="evMember" required></select>
+          </label>
+          <label>Fecha *
+            <input type="date" id="evDate" required />
+          </label>
+        </div>
+
+        <div class="form-grid-3">
+          <label>Canal (Color) *
+            <select id="evChannel" required></select>
+          </label>
+          <label>Hora inicio
+            <input type="time" id="evStartTime" value="09:30" />
+          </label>
+          <label>Hora fin
+            <input type="time" id="evEndTime" value="11:30" />
+          </label>
+        </div>
+
+        <div class="form-row checkbox-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="evAllDay" />
+            Todo el día (ej. Festivo, Día compensatorio, Back Office)
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label>Ubicación / Tienda / Enlace Teams
+            <input type="text" id="evLocation" placeholder="Ej: CC Xanadú / Enlace Google Meet / Teams" />
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label>Notas / Comentarios
+            <textarea id="evNotes" rows="2" placeholder="Detalles adicionales, material necesario, contacto..."></textarea>
+          </label>
+        </div>
+
+        <fieldset class="alerts-box">
+          <legend>🔔 Alertas en Móvil y PC (Google Workspace)</legend>
+          <div class="form-grid-2">
+            <label>Notificación Push (Móvil + PC)
+              <select id="evReminderPopup">
+                <option value="none">Sin alerta push</option>
+                <option value="15">15 minutos antes</option>
+                <option value="30">30 minutos antes</option>
+                <option value="60" selected>1 hora antes</option>
+                <option value="1440">1 día antes (24h)</option>
+              </select>
+            </label>
+            <label>Alerta por Correo (Gmail)
+              <select id="evReminderEmail">
+                <option value="none">Sin correo</option>
+                <option value="60">1 hora antes</option>
+                <option value="1440" selected>1 día antes (24h)</option>
+                <option value="2880">2 días antes</option>
+              </select>
+            </label>
+          </div>
+          <label class="checkbox-label">
+            <input type="checkbox" id="evSyncGoogle" checked />
+            Notificar al correo de la persona del grupo en Google Calendar (alertas en móvil y PC)
+          </label>
+          <div class="group-notify-box">
+            <span class="group-notify-label">Notificar también a otros miembros del grupo (nunca a personas externas):</span>
+            <div id="evGroupAttendees" class="group-attendees-chips"></div>
+          </div>
+        </fieldset>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btnDeleteEvent" class="btn btn-danger hidden">Eliminar</button>
+        <button type="button" id="btnCopyEvent" class="btn btn-secondary hidden" title="Crear una copia de este evento">📋 Copiar</button>
+        <div class="spacer"></div>
+        <button type="button" class="btn btn-secondary" data-close="eventModal">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Guardar evento</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: Equipo y Correos -->
+  <dialog id="teamModal" class="modal">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <h2>👥 Equipo de Trabajo y Cuentas de Correo</h2>
+        <button type="button" class="btn-icon" data-close="teamModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="help-text">
+          Asocia el correo de Google Workspace / Gmail de cada miembro. Al asignarles un evento, recibirán invitación y alertas automáticas en su móvil y PC.
+        </p>
+        <div id="teamList" class="team-list"></div>
+        <form id="addMemberForm" class="add-member-form">
+          <input type="text" id="newMemberId" placeholder="Rol / Nombre (ej. TL2)" required />
+          <input type="email" id="newMemberEmail" placeholder="correo@empresa.com" required />
+          <button type="submit" class="btn btn-primary">+ Añadir</button>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" data-close="teamModal">Listo</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Modal: Configuración Google Workspace (Envío directo de alertas y Vacaciones) -->
+  <dialog id="calendarsModal" class="modal">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <h2>⚙ Conexión Google Workspace</h2>
+        <button type="button" class="btn-icon" data-close="calendarsModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="config-section">
+          <h3>1. Credencial gratuita de Google Workspace (Sin servidor · 0 €)</h3>
+          <p class="help-text">
+            Pega aquí el <strong>OAuth 2.0 Client ID</strong> del equipo. Los eventos que crees se enviarán directamente al correo de cada persona para generar alertas en móvil y PC, sin leer ni interferir en su calendario personal.
+          </p>
+          <details class="setup-steps-box">
+            <summary>¿Cómo conseguir el Client ID gratis en 3 minutos?</summary>
+            <ol>
+              <li>Entra en <strong>console.cloud.google.com</strong> con tu cuenta de Google Workspace y crea un proyecto (0 €, sin tarjeta).</li>
+              <li>En <strong>APIs y servicios → Biblioteca</strong>, habilita <strong>Google Calendar API</strong> y <strong>Google Sheets API</strong>.</li>
+              <li>En <strong>Pantalla de consentimiento de OAuth</strong>, elige tipo <strong>Interno</strong> (mismo dominio) o añade los correos del grupo.</li>
+              <li>En <strong>Credenciales → Crear credenciales → ID de cliente de OAuth</strong>, elige <strong>Aplicación web</strong> y añade la URL de este calendario en <em>Orígenes de JavaScript autorizados</em>.</li>
+              <li>Copia el código que termina en <code>.apps.googleusercontent.com</code>, pégalo abajo y pulsa <strong>Guardar y Conectar</strong>.</li>
+            </ol>
+          </details>
+          <div class="inline-form">
+            <input type="text" id="googleClientIdInput" placeholder="1234567890-abcdefg.apps.googleusercontent.com" />
+            <button type="button" id="btnSaveGoogleConfig" class="btn btn-primary">Guardar y Conectar</button>
+          </div>
+          <label class="mt-8">Calendario compartido del grupo (Training):
+            <input type="text" id="primaryCalendarIdInput" value="primary" placeholder="primary o ID del calendario compartido" />
+          </label>
+        </div>
+
+        <hr class="divider" />
+
+        <div class="config-section">
+          <h3>2. Hoja de Festivos y Vacaciones (Usuarios APP)</h3>
+          <p class="help-text">
+            Lee las pestañas <code>FESTIVOS</code> y <code>VACACIONES</code> (solo <em>Aprobado</em>) para mostrar festivos y bloquear días de vacaciones automáticamente.
+          </p>
+          <div class="inline-form">
+            <input type="text" id="vacationsSheetIdInput" value="1K0vGOPwteG6ZjNVT7cDaEwIeb3ONcjmNec3-FGlH10g" placeholder="ID del Google Sheet de Festivos/Vacaciones" />
+            <button type="button" id="btnSyncVacationsSheet" class="btn btn-secondary">🔄 Leer Festivos/Vacaciones</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btnSyncNow" class="btn btn-secondary">🔄 Sincronizar ahora</button>
+        <button type="button" class="btn btn-primary" data-close="calendarsModal">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Modal: Confirmar acción al soltar evento (Copiar / Sustituir / Mover) -->
+  <dialog id="dropActionModal" class="modal modal-compact">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>¿Qué deseas hacer con el evento?</h2>
+        <button type="button" class="btn-icon" data-close="dropActionModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="dropActionSummary" class="help-text"></p>
+        <label id="dropTargetMemberLabel">Usuario destino
+          <select id="dropTargetMember"></select>
+        </label>
+      </div>
+      <div class="modal-footer drop-actions-footer">
+        <button type="button" id="btnDropCopy" class="btn btn-primary">📋 Copiar</button>
+        <button type="button" id="btnDropReplace" class="btn btn-danger">🔄 Sustituir</button>
+        <button type="button" id="btnDropMove" class="btn btn-secondary">➡ Mover</button>
+        <div class="spacer"></div>
+        <button type="button" class="btn btn-secondary" data-close="dropActionModal">Cancelar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js?v=26"></script>
+</body>
+</html>

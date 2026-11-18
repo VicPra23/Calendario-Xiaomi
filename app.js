@@ -3,10 +3,10 @@
    ========================================================================== */
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxPSEE3jj_xVyCEkrZ_piL0vvOHjh1xD41z89uMux1ijPEnqIuGeZK-DyJC6Az2JwS0/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyXW0FRgI4zGv4rVc2SZK2SEqpNwWHwBPWzELrT0FOy7K2EQpyLOEdN4NShacODcGgL/exec";
 
 const STORAGE_KEYS = {
-  EVENTS: "cal_xiaomi_events_v1",
+  EVENTS: "cal_xiaomi_events_v2",
   TEAM: "cal_xiaomi_team_v1",
   EXT_CALENDARS: "cal_xiaomi_ext_cals_v1",
   GOOGLE_CFG: "cal_xiaomi_google_cfg_v1",
@@ -95,135 +95,8 @@ const DEFAULT_EXT_CALENDARS = [
   },
 ];
 
-// Datos iniciales de ejemplo basados en la semana actual (Noviembre W46 - 2026)
-const SEED_EVENTS = [
-  {
-    id: "seed-1",
-    title: "FESTIVO",
-    memberId: "COORD",
-    channelId: "otros",
-    date: "2026-11-09",
-    allDay: true,
-    startTime: "09:00",
-    endTime: "18:00",
-    location: "Madrid",
-    notes: "La Almudena",
-    popupMin: 60,
-    emailMin: 1440,
-  },
-  {
-    id: "seed-2",
-    title: "Preparación escenas Pr briefing OBS",
-    memberId: "David",
-    channelId: "open_market",
-    date: "2026-11-09",
-    allDay: false,
-    startTime: "09:30",
-    endTime: "11:30",
-    location: "Oficina / Remoto",
-    notes: "",
-    popupMin: 30,
-    emailMin: 1440,
-  },
-  {
-    id: "seed-3",
-    title: "Telefónica Webinar 10",
-    memberId: "David",
-    channelId: "telefonica",
-    date: "2026-11-13",
-    allDay: false,
-    startTime: "10:00",
-    endTime: "11:00",
-    location: "Online",
-    notes: "",
-    popupMin: 15,
-    emailMin: 60,
-  },
-  {
-    id: "seed-4",
-    title: "MM ELCHE / REFUERZO PR Y Xiaomi 18",
-    memberId: "TL1",
-    channelId: "open_market",
-    date: "2026-11-13",
-    allDay: false,
-    startTime: "10:30",
-    endTime: "12:00",
-    location: "MediaMarkt Elche",
-    notes: "",
-    popupMin: 60,
-    emailMin: 1440,
-  },
-  {
-    id: "seed-5",
-    title: "MADRID / XIAOMI STORE XANADÚ / ONBOARDING",
-    memberId: "TM1",
-    channelId: "xiaomi_stores",
-    date: "2026-11-12",
-    allDay: false,
-    startTime: "10:00",
-    endTime: "14:00",
-    location: "CC Xanadú",
-    notes: "",
-    popupMin: 60,
-    emailMin: 1440,
-  },
-  {
-    id: "seed-6",
-    title: "FORMACIÓN INICIAL 10:00H",
-    memberId: "TB1",
-    channelId: "interno",
-    date: "2026-11-11",
-    allDay: false,
-    startTime: "10:00",
-    endTime: "12:00",
-    location: "Online Teams",
-    notes: "",
-    popupMin: 30,
-    emailMin: 1440,
-  },
-  {
-    id: "seed-7",
-    title: "BARCELONA / ESPACIO MOVISTAR / X18 SERIES",
-    memberId: "TB1",
-    channelId: "telefonica",
-    date: "2026-11-13",
-    allDay: false,
-    startTime: "15:00",
-    endTime: "16:00",
-    location: "Espacio Movistar Barcelona",
-    notes: "",
-    popupMin: 60,
-    emailMin: 1440,
-  },
-  {
-    id: "seed-8",
-    title: "MÁLAGA / ORG VIALIA",
-    memberId: "TS1",
-    channelId: "orange",
-    date: "2026-11-11",
-    allDay: false,
-    startTime: "10:00",
-    endTime: "13:00",
-    location: "CC Vialia Málaga",
-    notes: "",
-    popupMin: 60,
-    emailMin: 1440,
-  },
-  {
-    id: "seed-9",
-    title: "Formación Online TEAMS - PORTUGAL",
-    memberId: "TS1",
-    channelId: "interno",
-    date: "2026-11-09",
-    allDay: false,
-    startTime: "16:30",
-    endTime: "18:00",
-    location: "Microsoft Teams",
-    notes: "",
-    popupMin: 15,
-    emailMin: 60,
-  },
-];
+// Calendario limpio listo para producción (sin eventos de prueba)
+const SEED_EVENTS = [];
 
 // Estado de la aplicación
 let state = {
@@ -297,9 +170,9 @@ function getMonthNameEs(date) {
 /* ---------- Persistencia Local ---------- */
 function loadState() {
   try {
+    localStorage.removeItem("cal_xiaomi_events_v1");
     const ev = localStorage.getItem(STORAGE_KEYS.EVENTS);
-    state.events = ev ? JSON.parse(ev) : SEED_EVENTS;
-    if (!ev) localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(state.events));
+    state.events = ev ? JSON.parse(ev) : [];
 
     const tm = localStorage.getItem(STORAGE_KEYS.TEAM);
     if (tm) {
@@ -364,13 +237,16 @@ async function syncFromAppsScript(silent = false) {
     // Si hubo una escritura local mientras descargábamos, ignoramos esta lectura obsoleta
     if (pendingSyncWrites > 0 || Date.now() - lastWriteTimestamp < 8000) return;
     if (data.ok && Array.isArray(data.events)) {
-      if (data.events.length > 0) {
-        state.events = data.events;
-        saveEvents();
-      }
+      state.events = data.events;
+      saveEvents();
       if (data.blockedDays && Object.keys(data.blockedDays).length > 0) {
         state.blockedDays = data.blockedDays;
         saveBlockedDays();
+      }
+      if (Array.isArray(data.team) && data.team.length > 0) {
+        state.team = data.team;
+        saveTeam();
+        renderLegendAndSelects();
       }
       renderWeeks();
       if (!silent) showToast("Calendario del grupo actualizado");
@@ -960,16 +836,23 @@ function getFilteredEventsForCell(dateIso, memberId) {
   const chFilter = state.filters.channel;
 
   const all = [...state.events, ...state.externalEvents];
-  return all.filter((ev) => {
-    if (ev.date !== dateIso) return false;
-    if (ev.memberId !== memberId) return false;
-    if (chFilter !== "all" && ev.channelId !== chFilter) return false;
-    if (q) {
-      const hay = `${ev.title} ${ev.location || ""} ${ev.notes || ""}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
+  return all
+    .filter((ev) => {
+      if (ev.date !== dateIso) return false;
+      if (ev.memberId !== memberId) return false;
+      if (chFilter !== "all" && ev.channelId !== chFilter) return false;
+      if (q) {
+        const hay = `${ev.title} ${ev.location || ""} ${ev.notes || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (Boolean(a.allDay) !== Boolean(b.allDay)) return a.allDay ? -1 : 1;
+      return normalizeTimeStr(a.startTime, "00:00").localeCompare(
+        normalizeTimeStr(b.startTime, "00:00")
+      );
+    });
 }
 
 function renderEventPill(ev) {
@@ -1305,6 +1188,18 @@ async function executeDropAction(mode) {
   }
 }
 
+function buildAttendeeEmails(memberId, groupAttendees = []) {
+  const emails = [];
+  const addById = (id) => {
+    const m = state.team.find((x) => x.id === id);
+    const em = (m?.email || "").trim().toLowerCase();
+    if (em && !emails.includes(em)) emails.push(em);
+  };
+  addById(memberId);
+  (groupAttendees || []).forEach(addById);
+  return emails;
+}
+
 async function moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy) {
   const orig = state.events.find((x) => x.id === eventId);
   if (!orig) return;
@@ -1319,11 +1214,13 @@ async function moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy) {
         googleCalId: null,
         date: targetDate,
         memberId: targetMemberId,
+        attendeeEmails: buildAttendeeEmails(targetMemberId, orig.groupAttendees),
       }
     : {
         ...orig,
         date: targetDate,
         memberId: targetMemberId,
+        attendeeEmails: buildAttendeeEmails(targetMemberId, orig.groupAttendees),
       };
 
   if (updated.syncGoogle && state.accessToken) {
@@ -1425,6 +1322,7 @@ async function handleSaveEvent(e) {
         document.querySelectorAll("#evGroupAttendees input:checked")
       ).map((cb) => cb.value),
     };
+    ev.attendeeEmails = buildAttendeeEmails(ev.memberId, ev.groupAttendees);
 
     // Guardado optimista inmediato: cierra el modal al instante para evitar dobles clics
     const idx = state.events.findIndex((item) => item.id === id);
@@ -1480,6 +1378,13 @@ async function handleDeleteEvent() {
   const ev = state.events.find((x) => x.id === id);
   if (!ev) return;
 
+  saveUndoSnapshot(`Eliminar "${ev.title}"`);
+  state.events = state.events.filter((x) => x.id !== id);
+  saveEvents();
+  document.getElementById("eventModal").close();
+  renderWeeks();
+  showToast("Evento eliminado", true);
+
   if (APPS_SCRIPT_URL) {
     await postToAppsScript({ action: "delete", id, googleEventId: ev.googleEventId || null });
   } else if (ev.googleEventId && state.accessToken) {
@@ -1492,12 +1397,6 @@ async function handleDeleteEvent() {
       console.warn("No se pudo eliminar en Google Calendar:", err);
     }
   }
-
-  state.events = state.events.filter((x) => x.id !== id);
-  saveEvents();
-  document.getElementById("eventModal").close();
-  renderWeeks();
-  showToast("Evento eliminado");
 }
 
 /* ---------- Gestión del Equipo y Correos ---------- */
@@ -1520,6 +1419,7 @@ function renderTeamList() {
       const idx = Number(inp.dataset.idx);
       state.team[idx][inp.dataset.field] = inp.value.trim();
       saveTeam();
+      if (APPS_SCRIPT_URL) postToAppsScript({ action: "saveTeam", team: state.team });
       renderLegendAndSelects();
       renderWeeks();
     };
@@ -1530,6 +1430,7 @@ function renderTeamList() {
       const idx = Number(btn.dataset.removeMember);
       state.team.splice(idx, 1);
       saveTeam();
+      if (APPS_SCRIPT_URL) postToAppsScript({ action: "saveTeam", team: state.team });
       renderTeamList();
       renderLegendAndSelects();
       renderWeeks();
@@ -1770,9 +1671,7 @@ function parseShortDateToken(token, defaultYear = 2026) {
 }
 
 async function fetchSheetValues(sheetId, sheetName) {
-  if (APPS_SCRIPT_URL) {
-    await postToAppsScript({ action: "replaceAll", events: state.events });
-  } else if (state.accessToken) {
+  if (state.accessToken) {
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(sheetName + "!A1:R500")}`;
     const data = await gFetch(url);
     return data.values || [];
@@ -2163,6 +2062,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!name) return;
     state.team.push({ id: name, name, email });
     saveTeam();
+    if (APPS_SCRIPT_URL) postToAppsScript({ action: "saveTeam", team: state.team });
     e.target.reset();
     renderTeamList();
     renderLegendAndSelects();

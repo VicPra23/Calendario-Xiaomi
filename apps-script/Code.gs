@@ -15,6 +15,7 @@
 
 const VACATIONS_SHEET_ID = "1K0vGOPwteG6ZjNVT7cDaEwIeb3ONcjmNec3-FGlH10g";
 const EVENTS_SHEET_NAME = "EVENTOS_WEB";
+const TEAM_SHEET_NAME = "EQUIPO_WEB";
 
 const TEAM_MAP = {
   COORD: "victorprado@salesland.net",
@@ -26,7 +27,7 @@ const TEAM_MAP = {
   TN1: "hamzagaya@salesland.net",
 };
 
-function getEventsSheet_() {
+function getSpreadsheet_() {
   const props = PropertiesService.getScriptProperties();
   let ssId = props.getProperty("EVENTS_SS_ID");
   let ss;
@@ -41,6 +42,11 @@ function getEventsSheet_() {
     ss = SpreadsheetApp.create("Calendario Training - Base de Datos Compartida");
     props.setProperty("EVENTS_SS_ID", ss.getId());
   }
+  return ss;
+}
+
+function getEventsSheet_() {
+  const ss = getSpreadsheet_();
   let sheet = ss.getSheetByName(EVENTS_SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(EVENTS_SHEET_NAME);
@@ -53,8 +59,39 @@ function getEventsSheet_() {
   return sheet;
 }
 
+function getTeamSheet_() {
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(TEAM_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(TEAM_SHEET_NAME);
+    sheet.appendRow(["id", "name", "email"]);
+  }
+  if (sheet.getLastRow() <= 1) {
+    Object.keys(TEAM_MAP).forEach((id) => {
+      sheet.appendRow([id, id, TEAM_MAP[id]]);
+    });
+  }
+  return sheet;
+}
+
+function readTeamFromSheet_(teamSheet) {
+  const rows = teamSheet.getDataRange().getValues();
+  const team = [];
+  for (let i = 1; i < rows.length; i++) {
+    const id = String(rows[i][0] || "").trim();
+    if (!id) continue;
+    team.push({
+      id: id,
+      name: String(rows[i][1] || id).trim(),
+      email: String(rows[i][2] || "").trim(),
+    });
+  }
+  return team;
+}
+
 function doGet() {
   const sheet = getEventsSheet_();
+  const teamSheet = getTeamSheet_();
   syncEditsFromGoogleCalendar_(sheet);
   const rows = sheet.getDataRange().getValues();
   const events = [];
@@ -81,7 +118,8 @@ function doGet() {
   }
 
   const blockedDays = readVacationsAndHolidays_();
-  return jsonOut_({ ok: true, events, blockedDays });
+  const team = readTeamFromSheet_(teamSheet);
+  return jsonOut_({ ok: true, events, blockedDays, team });
 }
 
 function doPost(e) {
@@ -135,6 +173,18 @@ function doPost(e) {
       return jsonOut_({ ok: true });
     }
 
+    if (action === "saveTeam" && Array.isArray(payload.team)) {
+      const teamSheet = getTeamSheet_();
+      const lastRow = teamSheet.getLastRow();
+      if (lastRow > 1) teamSheet.deleteRows(2, lastRow - 1);
+      payload.team.forEach((m) => {
+        if (m && m.id) {
+          teamSheet.appendRow([String(m.id), String(m.name || m.id), String(m.email || "")]);
+        }
+      });
+      return jsonOut_({ ok: true });
+    }
+
     return jsonOut_({ ok: false, error: "Acción no reconocida" });
   } finally {
     lock.releaseLock();
@@ -184,8 +234,8 @@ function syncEditsFromGoogleCalendar_(sheet) {
       const changed =
         newTitle !== String(rows[i][1] || "") ||
         newDate !== formatDateIso_(rows[i][4]) ||
-        newStart !== String(rows[i][5] || "") ||
-        newEnd !== String(rows[i][6] || "") ||
+        newStart !== formatTimeHhMm_(rows[i][5], "09:30") ||
+        newEnd !== formatTimeHhMm_(rows[i][6], "11:30") ||
         newAllDay !== (rows[i][7] === true || rows[i][7] === "true") ||
         newLoc !== String(rows[i][8] || "");
 
@@ -272,12 +322,24 @@ function deleteRowById_(sheet, id) {
 function sendCalendarInvite_(ev) {
   try {
     const guests = [];
-    if (TEAM_MAP[ev.memberId]) guests.push(TEAM_MAP[ev.memberId]);
-    (ev.groupAttendees || []).forEach((id) => {
-      if (TEAM_MAP[id] && guests.indexOf(TEAM_MAP[id]) === -1) {
-        guests.push(TEAM_MAP[id]);
-      }
-    });
+    if (Array.isArray(ev.attendeeEmails) && ev.attendeeEmails.length) {
+      ev.attendeeEmails.forEach((em) => {
+        const clean = String(em || "").trim().toLowerCase();
+        if (clean && guests.indexOf(clean) === -1) guests.push(clean);
+      });
+    } else {
+      const teamRows = readTeamFromSheet_(getTeamSheet_());
+      const teamLookup = {};
+      Object.keys(TEAM_MAP).forEach((k) => { teamLookup[k] = TEAM_MAP[k]; });
+      teamRows.forEach((m) => { if (m.email) teamLookup[m.id] = m.email; });
+
+      if (teamLookup[ev.memberId]) guests.push(teamLookup[ev.memberId]);
+      (ev.groupAttendees || []).forEach((id) => {
+        if (teamLookup[id] && guests.indexOf(teamLookup[id]) === -1) {
+          guests.push(teamLookup[id]);
+        }
+      });
+    }
     if (!guests.length) return "";
 
     const cal = CalendarApp.getDefaultCalendar();

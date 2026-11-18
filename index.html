@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=42" />
+  <link rel="stylesheet" href="styles.css?v=43" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -40,6 +40,11 @@
           <select id="selectMonth" class="select-inline" title="Mes"></select>
           <span class="date-sep">/</span>
           <select id="selectWeek" class="select-inline" title="Semana"></select>
+        </div>
+        <div class="view-tabs" role="group" aria-label="Modo de vista">
+          <button type="button" class="view-tab" data-calendar-mode="week">Semana</button>
+          <button type="button" class="view-tab is-active" data-calendar-mode="month">Mes</button>
+          <button type="button" class="view-tab" data-calendar-mode="agenda">Agenda</button>
         </div>
       </div>
 
@@ -285,6 +290,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=42"></script>
+  <script src="app.js?v=43"></script>
 </body>
 </html>

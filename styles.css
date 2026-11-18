@@ -32,10 +32,11 @@
 
 body {
   margin: 0;
-  font-family: Arial, "Segoe UI", Roboto, Helvetica, sans-serif;
+  font-family: "MiSans", "Inter", "Segoe UI", Arial, Roboto, Helvetica, sans-serif;
   background: var(--bg-page);
   color: var(--text-main);
   font-size: 13px;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Topbar */
@@ -181,6 +182,37 @@ body {
   color: #9ca3af;
   font-size: 12px;
   user-select: none;
+}
+
+.view-tabs {
+  display: inline-flex;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 7px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.view-tab {
+  border: none;
+  background: transparent;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.view-tab:hover {
+  color: #111827;
+}
+
+.view-tab.is-active {
+  background: #ffffff;
+  color: #ff6900;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 .multi-filter {
@@ -357,8 +389,9 @@ body {
 .week-block {
   background: #ffffff;
   border: 1.5px solid var(--border-strong);
+  border-radius: 6px;
   overflow-x: auto;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 }
 
 .week-table {

@@ -115,7 +115,8 @@ let state = {
   syncTimer: null,
   clipboard: null, // { mode: "copy" | "cut", eventId: string }
   viewMode: "auto", // "auto" | "table" | "mobile"
-  anchorDate: new Date(), // Se muestra esta semana + las 2 siguientes
+  calendarMode: "month", // "week" | "month" | "agenda"
+  anchorDate: new Date(),
   filters: { search: "", members: [], channel: "all" }, // members: [] = Todo el equipo
 };
 
@@ -526,10 +527,17 @@ function updateViewToggleLabel() {
   btn.textContent = isMobileView() ? "📊 Tabla" : "📱 Móvil";
 }
 
+function getVisibleWeeks() {
+  if (state.calendarMode === "week" || state.calendarMode === "agenda") {
+    return [getMonday(state.anchorDate)];
+  }
+  return getMonthWeeks(state.anchorDate.getFullYear(), state.anchorDate.getMonth());
+}
+
 function renderWeeks() {
   updateViewToggleLabel();
   syncDateSelectorsFromAnchor();
-  if (isMobileView()) {
+  if (isMobileView() || state.calendarMode === "agenda") {
     renderMobileWeeks();
     return;
   }
@@ -540,7 +548,7 @@ function renderMobileWeeks() {
   const container = document.getElementById("weeksContainer");
   container.innerHTML = "";
 
-  const weeks = getMonthWeeks(state.anchorDate.getFullYear(), state.anchorDate.getMonth());
+  const weeks = getVisibleWeeks();
   const todayIso = toIsoDate(new Date());
   const dayNames = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
   const visibleMembers = state.team.filter((m) => isMemberVisible(m.id));
@@ -548,7 +556,7 @@ function renderMobileWeeks() {
   for (const weekStart of weeks) {
     const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
     const weekNum = getISOWeekNumber(weekStart);
-    const monthLabel = MONTHS_ES[state.anchorDate.getMonth()].toUpperCase();
+    const monthLabel = getMonthNameEs(weekDays[3]);
 
     const card = document.createElement("section");
     card.className = "mobile-week-card";
@@ -665,14 +673,14 @@ function renderTableWeeks() {
   const container = document.getElementById("weeksContainer");
   container.innerHTML = "";
 
-  const weeks = getMonthWeeks(state.anchorDate.getFullYear(), state.anchorDate.getMonth());
+  const weeks = getVisibleWeeks();
   const todayIso = toIsoDate(new Date());
   const weekdayLetters = ["L", "M", "X", "J", "V", "S", "D"];
 
   for (const weekStart of weeks) {
     const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
     const weekNum = getISOWeekNumber(weekStart);
-    const monthLabel = MONTHS_ES[state.anchorDate.getMonth()].toUpperCase();
+    const monthLabel = getMonthNameEs(weekDays[3]);
 
     const block = document.createElement("div");
     block.className = "week-block";
@@ -1299,6 +1307,15 @@ async function handleSaveEvent(e) {
   }
 
   try {
+    const startTimeVal = document.getElementById("evStartTime").value;
+    const endTimeVal = document.getElementById("evEndTime").value;
+    const allDayVal = document.getElementById("evAllDay").checked;
+
+    if (!allDayVal && startTimeVal && endTimeVal && endTimeVal <= startTimeVal) {
+      showToast("La hora de fin debe ser posterior a la hora de inicio");
+      return;
+    }
+
     const id = document.getElementById("evId").value || `ev-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const ev = {
       id,
@@ -1308,9 +1325,9 @@ async function handleSaveEvent(e) {
       memberId: document.getElementById("evMember").value,
       channelId: document.getElementById("evChannel").value,
       date: document.getElementById("evDate").value,
-      startTime: document.getElementById("evStartTime").value,
-      endTime: document.getElementById("evEndTime").value,
-      allDay: document.getElementById("evAllDay").checked,
+      startTime: startTimeVal,
+      endTime: endTimeVal,
+      allDay: allDayVal,
       location: "",
       notes: document.getElementById("evNotes").value.trim(),
       popupMin: document.getElementById("evReminderPopup").value,
@@ -1946,11 +1963,19 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   document.getElementById("btnPrevWeek").onclick = () => {
-    state.anchorDate = new Date(state.anchorDate.getFullYear(), state.anchorDate.getMonth() - 1, 1);
+    if (state.calendarMode === "week" || state.calendarMode === "agenda") {
+      state.anchorDate = addDays(state.anchorDate, -7);
+    } else {
+      state.anchorDate = new Date(state.anchorDate.getFullYear(), state.anchorDate.getMonth() - 1, 1);
+    }
     renderWeeks();
   };
   document.getElementById("btnNextWeek").onclick = () => {
-    state.anchorDate = new Date(state.anchorDate.getFullYear(), state.anchorDate.getMonth() + 1, 1);
+    if (state.calendarMode === "week" || state.calendarMode === "agenda") {
+      state.anchorDate = addDays(state.anchorDate, 7);
+    } else {
+      state.anchorDate = new Date(state.anchorDate.getFullYear(), state.anchorDate.getMonth() + 1, 1);
+    }
     renderWeeks();
   };
   document.getElementById("btnToday").onclick = () => {
@@ -1959,6 +1984,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const target = document.querySelector(`[data-week-monday="${toIsoDate(getMonday(new Date()))}"]`);
     target?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  document.querySelectorAll("[data-calendar-mode]").forEach((btn) => {
+    btn.onclick = () => {
+      state.calendarMode = btn.dataset.calendarMode;
+      document.querySelectorAll("[data-calendar-mode]").forEach((b) =>
+        b.classList.toggle("is-active", b === btn)
+      );
+      renderWeeks();
+    };
+  });
 
   const jumpToMonthYear = () => {
     const y = Number(document.getElementById("selectYear").value);
@@ -1970,6 +2005,11 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("selectYear").onchange = jumpToMonthYear;
   document.getElementById("selectWeek").onchange = (e) => {
     if (!e.target.value) return;
+    if (state.calendarMode === "week" || state.calendarMode === "agenda") {
+      state.anchorDate = new Date(e.target.value + "T00:00:00");
+      renderWeeks();
+      return;
+    }
     const target = document.querySelector(`[data-week-monday="${e.target.value}"]`);
     if (target) {
       target.scrollIntoView({ behavior: "smooth", block: "start" });

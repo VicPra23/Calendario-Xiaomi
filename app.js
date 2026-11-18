@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwKfViEUHpp5AfjbbfrQ2IoMDJybPbUl2bVgB3FP6SO021RWFQPJPgkylYKZZq0ywNN/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
 
 const STORAGE_KEYS = {
   EVENTS: "cal_xiaomi_events_v2",
@@ -336,16 +336,34 @@ async function performUndo() {
   lastUndoSnapshot = null;
   document.getElementById("btnUndo")?.classList.add("hidden");
 
-  const prevIds = new Set(state.events.map((e) => e.id));
+  const prevEvents = state.events;
+  const prevMap = new Map(prevEvents.map((e) => [e.id, e]));
+  const snapIds = new Set(snap.events.map((e) => e.id));
+
   state.events = snap.events;
   saveEvents();
   renderWeeks();
 
   if (APPS_SCRIPT_URL) {
-    await postToAppsScript({ action: "replaceAll", events: state.events });
+    // Deshacer por ID para no pisar eventos creados por otros compañeros
+    for (const oldEv of prevEvents) {
+      if (!snapIds.has(oldEv.id)) {
+        await postToAppsScript({ action: "delete", id: oldEv.id, googleEventId: oldEv.googleEventId || null });
+      }
+    }
+    for (const ev of state.events) {
+      const prev = prevMap.get(ev.id);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(ev)) {
+        const res = await postToAppsScript({ action: "upsert", event: ev });
+        if (res?.googleEventId) {
+          ev.googleEventId = res.googleEventId;
+        }
+      }
+    }
+    saveEvents();
   } else if (state.accessToken) {
     for (const ev of state.events) {
-      if (ev.syncGoogle && !prevIds.has(ev.id)) {
+      if (ev.syncGoogle && !prevMap.has(ev.id)) {
         try {
           const synced = await upsertGoogleCalendarEvent({ ...ev, googleEventId: null });
           ev.googleEventId = synced.id;
@@ -1351,17 +1369,19 @@ async function handleSaveEvent(e) {
     renderWeeks();
 
     if (APPS_SCRIPT_URL) {
-      showToast("Guardando evento y enviando alerta...");
+      showToast("Guardando evento y actualizando Google Calendar...");
       const res = await postToAppsScript({ action: "upsert", event: ev });
       if (res?.googleEventId) {
         ev.googleEventId = res.googleEventId;
         saveEvents();
       }
-      showToast(
-        res?.ok
-          ? "Evento guardado para todo el grupo y alerta enviada."
-          : "Guardado localmente (error de red al sincronizar)."
-      );
+      if (!res?.ok) {
+        showToast("Guardado localmente (error de red al conectar con Google).");
+      } else if (res.syncStatus === "error" || res.syncStatus === "no_recipients") {
+        showToast(`Guardado en la web, pero aviso en Calendar: ${res.syncError || res.syncStatus}`);
+      } else {
+        showToast("Evento guardado para todo el grupo y actualizado en Google Calendar.");
+      }
     } else if (ev.syncGoogle && state.accessToken) {
       try {
         const synced = await upsertGoogleCalendarEvent(ev);

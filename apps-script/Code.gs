@@ -17,6 +17,12 @@ const VACATIONS_SHEET_ID = "1K0vGOPwteG6ZjNVT7cDaEwIeb3ONcjmNec3-FGlH10g";
 const EVENTS_SHEET_NAME = "EVENTOS_WEB";
 const TEAM_SHEET_NAME = "EQUIPO_WEB";
 
+function getMasterCalendar_() {
+  const id = PropertiesService.getScriptProperties().getProperty("MASTER_CALENDAR_ID");
+  if (!id) return CalendarApp.getDefaultCalendar();
+  return CalendarApp.getCalendarById(id) || CalendarApp.getDefaultCalendar();
+}
+
 const TEAM_MAP = {
   COORD: "victorprado@salesland.net",
   David: "davidotero@salesland.net",
@@ -54,8 +60,11 @@ function getEventsSheet_() {
       "id", "title", "memberId", "channelId", "date", "startTime",
       "endTime", "allDay", "location", "notes", "popupMin", "emailMin",
       "groupAttendees", "syncGoogle", "updatedAt", "googleEventId",
+      "syncStatus", "syncError",
     ]);
   }
+  if (sheet.getRange(1, 17).getValue() !== "syncStatus") sheet.getRange(1, 17).setValue("syncStatus");
+  if (sheet.getRange(1, 18).getValue() !== "syncError") sheet.getRange(1, 18).setValue("syncError");
   return sheet;
 }
 
@@ -114,6 +123,8 @@ function doGet() {
       groupAttendees: r[12] ? JSON.parse(String(r[12])) : [],
       syncGoogle: r[13] !== false && r[13] !== "false",
       googleEventId: r[15] ? String(r[15]) : null,
+      syncStatus: String(r[16] || (r[15] ? "synced" : "pending")),
+      syncError: String(r[17] || ""),
     });
   }
 
@@ -133,16 +144,33 @@ function doPost(e) {
     if (action === "upsert" && payload.event) {
       const ev = payload.event;
       const prevGoogleId = findGoogleEventIdByLocalId_(sheet, ev.id) || ev.googleEventId;
-      if (prevGoogleId) {
-        deleteGoogleEventById_(prevGoogleId);
-      }
-      let newGoogleId = "";
+      ev.googleEventId = prevGoogleId || "";
+      ev.syncStatus = "disabled";
+      ev.syncError = "";
+
       if (ev.syncGoogle !== false) {
-        newGoogleId = sendCalendarInvite_(ev) || "";
+        try {
+          const result = upsertCalendarInvite_(ev, prevGoogleId);
+          ev.googleEventId = result.googleEventId || "";
+          ev.syncStatus = result.syncStatus;
+          ev.syncError = result.syncError || "";
+        } catch (err) {
+          ev.syncStatus = "error";
+          ev.syncError = String((err && err.message) || err);
+          Logger.log("Error sincronizando Google Calendar: " + ev.syncError);
+        }
+      } else if (prevGoogleId) {
+        deleteGoogleEventById_(prevGoogleId);
+        ev.googleEventId = "";
       }
-      ev.googleEventId = newGoogleId;
+
       upsertRow_(sheet, ev);
-      return jsonOut_({ ok: true, googleEventId: newGoogleId });
+      return jsonOut_({
+        ok: true,
+        googleEventId: ev.googleEventId,
+        syncStatus: ev.syncStatus,
+        syncError: ev.syncError,
+      });
     }
 
     if (action === "delete" && payload.id) {
@@ -209,7 +237,7 @@ function syncEditsFromGoogleCalendar_(sheet) {
     const now = new Date();
     const minDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const maxDate = new Date(now.getFullYear(), now.getMonth() + 4, 0);
-    const cal = CalendarApp.getDefaultCalendar();
+    const cal = getMasterCalendar_();
     const gEvents = cal.getEvents(minDate, maxDate);
     const byId = {};
     gEvents.forEach((ge) => {
@@ -283,7 +311,7 @@ function syncEditsFromGoogleCalendar_(sheet) {
 function deleteGoogleEventById_(googleEventId) {
   if (!googleEventId) return;
   try {
-    const cal = CalendarApp.getDefaultCalendar();
+    const cal = getMasterCalendar_();
     const gEv = cal.getEventById(googleEventId);
     if (gEv) {
       gEv.deleteEvent();
@@ -325,6 +353,8 @@ function upsertRow_(sheet, ev) {
     ev.syncGoogle !== false,
     new Date().toISOString(),
     ev.googleEventId || "",
+    ev.syncStatus || "",
+    ev.syncError || "",
   ];
 
   for (let i = 1; i < rows.length; i++) {
@@ -345,62 +375,82 @@ function deleteRowById_(sheet, id) {
   }
 }
 
-function sendCalendarInvite_(ev) {
-  try {
-    const guests = [];
-    if (Array.isArray(ev.attendeeEmails) && ev.attendeeEmails.length) {
-      ev.attendeeEmails.forEach((em) => {
-        const clean = String(em || "").trim().toLowerCase();
-        if (clean && guests.indexOf(clean) === -1) guests.push(clean);
-      });
-    } else {
-      const teamRows = readTeamFromSheet_(getTeamSheet_());
-      const teamLookup = {};
-      Object.keys(TEAM_MAP).forEach((k) => { teamLookup[k] = TEAM_MAP[k]; });
-      teamRows.forEach((m) => { if (m.email) teamLookup[m.id] = m.email; });
-
-      if (teamLookup[ev.memberId]) guests.push(teamLookup[ev.memberId]);
-      (ev.groupAttendees || []).forEach((id) => {
-        if (teamLookup[id] && guests.indexOf(teamLookup[id]) === -1) {
-          guests.push(teamLookup[id]);
-        }
-      });
+function resolveAttendeeEmails_(ev) {
+  const recipients = [];
+  const add = (email) => {
+    const clean = String(email || "").trim().toLowerCase();
+    if (clean && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean) && recipients.indexOf(clean) < 0) {
+      recipients.push(clean);
     }
-    if (!guests.length) return "";
+  };
+  const lookup = {};
+  readTeamFromSheet_(getTeamSheet_()).forEach((m) => {
+    lookup[m.id] = m.email || "";
+  });
+  add(lookup[ev.memberId]);
+  (ev.groupAttendees || []).forEach((id) => add(lookup[id]));
+  return recipients;
+}
 
-    const cal = CalendarApp.getDefaultCalendar();
-    const title = `[${ev.memberId}] ${ev.title}`;
-    const desc = `${ev.notes || ""}\n\n(Enviado desde Calendario Training)`;
-    const tz = Session.getScriptTimeZone();
+function upsertCalendarInvite_(ev, prevGoogleId) {
+  const guests = resolveAttendeeEmails_(ev);
+  if (!guests.length) {
+    return {
+      googleEventId: prevGoogleId || "",
+      syncStatus: "no_recipients",
+      syncError: "No hay correo configurado en Equipo para esta persona",
+    };
+  }
+
+  const cal = getMasterCalendar_();
+  const title = `[${ev.memberId}] ${ev.title}`;
+  const desc = `${ev.notes || ""}\n\n(Enviado desde Calendario Training)`;
+  const tz = Session.getScriptTimeZone();
+  const eventDate = Utilities.parseDate(ev.date, tz, "yyyy-MM-dd");
+  const start = ev.allDay ? null : Utilities.parseDate(`${ev.date} ${ev.startTime || "09:30"}`, tz, "yyyy-MM-dd HH:mm");
+  const end = ev.allDay ? null : Utilities.parseDate(`${ev.date} ${ev.endTime || "11:30"}`, tz, "yyyy-MM-dd HH:mm");
+  if (!ev.allDay && !(end > start)) {
+    throw new Error("La hora final debe ser posterior a la inicial");
+  }
+
+  let event = prevGoogleId ? cal.getEventById(prevGoogleId) : null;
+  if (!event) {
     const opts = {
       description: desc,
       location: ev.location || "",
       guests: guests.join(","),
       sendInvites: false,
     };
+    event = ev.allDay
+      ? cal.createAllDayEvent(title, eventDate, opts)
+      : cal.createEvent(title, start, end, opts);
+  } else {
+    // Actualiza el mismo evento in-place conservando ID y asistentes
+    event.setTitle(title);
+    event.setDescription(desc);
+    event.setLocation(ev.location || "");
+    if (ev.allDay) event.setAllDayDate(eventDate);
+    else event.setTime(start, end);
 
-    let created;
-    if (ev.allDay) {
-      const d = Utilities.parseDate(ev.date, tz, "yyyy-MM-dd");
-      created = cal.createAllDayEvent(title, d, opts);
-    } else {
-      const start = Utilities.parseDate(`${ev.date} ${ev.startTime || "09:30"}`, tz, "yyyy-MM-dd HH:mm");
-      const end = Utilities.parseDate(`${ev.date} ${ev.endTime || "11:30"}`, tz, "yyyy-MM-dd HH:mm");
-      created = cal.createEvent(title, start, end, opts);
-    }
-
-    if (created) {
-      created.setGuestsCanModify(true);
-      created.setGuestsCanInviteOthers(true);
-      if (ev.popupMin && ev.popupMin !== "none") created.addPopupReminder(Number(ev.popupMin));
-      if (ev.emailMin && ev.emailMin !== "none") created.addEmailReminder(Number(ev.emailMin));
-      return created.getId();
-    }
-    return "";
-  } catch (err) {
-    Logger.log("Error enviando invitación: " + err);
-    return "";
+    const existing = event.getGuestList().map((g) => g.getEmail().toLowerCase());
+    existing.forEach((email) => {
+      if (guests.indexOf(email) < 0) event.removeGuest(email);
+    });
+    guests.forEach((email) => {
+      if (existing.indexOf(email) < 0) event.addGuest(email);
+    });
   }
+
+  event.setGuestsCanModify(true);
+  event.setGuestsCanInviteOthers(false);
+  event.removeAllReminders();
+  if (ev.popupMin && ev.popupMin !== "none") event.addPopupReminder(Number(ev.popupMin));
+  if (ev.emailMin && ev.emailMin !== "none") event.addEmailReminder(Number(ev.emailMin));
+  return { googleEventId: event.getId(), syncStatus: "synced", syncError: "" };
+}
+
+function sendCalendarInvite_(ev) {
+  return upsertCalendarInvite_(ev, null).googleEventId || "";
 }
 
 function readVacationsAndHolidays_() {

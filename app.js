@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzqXWck-owEQJtp35bZR3kOgADmIpu1yNlnTQW97ONpFHsi1EbKvL3WuD43SFZGchUQ/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw1mvttA3Hdnkczl97aQXqkpLyZ3tBn_Vpy-bzE-nIbOEGEA7XgTfIE8sXeXR1Ea3qv/exec";
 
 const STORAGE_KEYS = {
   EVENTS: "cal_xiaomi_events_v1",
@@ -352,11 +352,17 @@ function isCellLocked(blocked) {
   return Boolean(blocked && blocked.type !== "FESTIVO");
 }
 
+let pendingSyncWrites = 0;
+let lastWriteTimestamp = 0;
+
 async function syncFromAppsScript(silent = false) {
   if (!APPS_SCRIPT_URL) return;
+  if (pendingSyncWrites > 0 || Date.now() - lastWriteTimestamp < 8000) return;
   try {
     const res = await fetch(APPS_SCRIPT_URL);
     const data = await res.json();
+    // Si hubo una escritura local mientras descargábamos, ignoramos esta lectura obsoleta
+    if (pendingSyncWrites > 0 || Date.now() - lastWriteTimestamp < 8000) return;
     if (data.ok && Array.isArray(data.events)) {
       if (data.events.length > 0) {
         state.events = data.events;
@@ -376,16 +382,21 @@ async function syncFromAppsScript(silent = false) {
 
 async function postToAppsScript(payload) {
   if (!APPS_SCRIPT_URL) return false;
+  pendingSyncWrites++;
+  lastWriteTimestamp = Date.now();
   try {
     await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(payload),
     });
+    lastWriteTimestamp = Date.now();
     return true;
   } catch (err) {
     console.warn("Error enviando cambio a Apps Script:", err);
     return false;
+  } finally {
+    pendingSyncWrites = Math.max(0, pendingSyncWrites - 1);
   }
 }
 
@@ -1299,7 +1310,7 @@ async function moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy) {
   const updated = isCopy
     ? {
         ...orig,
-        id: `ev-${Date.now()}`,
+        id: `ev-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
         googleEventId: null,
         googleCalId: null,
         date: targetDate,

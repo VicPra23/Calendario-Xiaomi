@@ -85,55 +85,60 @@ function doGet() {
 }
 
 function doPost(e) {
-  const payload = JSON.parse(e.postData.contents || "{}");
-  const action = payload.action;
-  const sheet = getEventsSheet_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const payload = JSON.parse(e.postData.contents || "{}");
+    const action = payload.action;
+    const sheet = getEventsSheet_();
 
-  if (action === "upsert" && payload.event) {
-    const ev = payload.event;
-    const prevGoogleId = findGoogleEventIdByLocalId_(sheet, ev.id) || ev.googleEventId;
-    if (prevGoogleId) {
-      deleteGoogleEventById_(prevGoogleId);
-    }
-    let newGoogleId = "";
-    if (ev.syncGoogle !== false) {
-      newGoogleId = sendCalendarInvite_(ev) || "";
-    }
-    ev.googleEventId = newGoogleId;
-    upsertRow_(sheet, ev);
-    return jsonOut_({ ok: true, googleEventId: newGoogleId });
-  }
-
-  if (action === "delete" && payload.id) {
-    const prevGoogleId = findGoogleEventIdByLocalId_(sheet, payload.id);
-    if (prevGoogleId) {
-      deleteGoogleEventById_(prevGoogleId);
-    }
-    deleteRowById_(sheet, payload.id);
-    return jsonOut_({ ok: true });
-  }
-
-  if (action === "replaceAll" && Array.isArray(payload.events)) {
-    const rows = sheet.getDataRange().getValues();
-    const nextIds = new Set(payload.events.map((x) => String(x.id)));
-    // Eliminar de Google Calendar los eventos que ya no están tras Deshacer/Sustituir
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] && !nextIds.has(String(rows[i][0])) && rows[i][15]) {
-        deleteGoogleEventById_(String(rows[i][15]));
+    if (action === "upsert" && payload.event) {
+      const ev = payload.event;
+      const prevGoogleId = findGoogleEventIdByLocalId_(sheet, ev.id) || ev.googleEventId;
+      if (prevGoogleId) {
+        deleteGoogleEventById_(prevGoogleId);
       }
-    }
-    const lastRow = sheet.getLastRow();
-    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
-    payload.events.forEach((ev) => {
-      if (ev.syncGoogle !== false && !ev.googleEventId) {
-        ev.googleEventId = sendCalendarInvite_(ev) || "";
+      let newGoogleId = "";
+      if (ev.syncGoogle !== false) {
+        newGoogleId = sendCalendarInvite_(ev) || "";
       }
+      ev.googleEventId = newGoogleId;
       upsertRow_(sheet, ev);
-    });
-    return jsonOut_({ ok: true });
-  }
+      return jsonOut_({ ok: true, googleEventId: newGoogleId });
+    }
 
-  return jsonOut_({ ok: false, error: "Acción no reconocida" });
+    if (action === "delete" && payload.id) {
+      const prevGoogleId = findGoogleEventIdByLocalId_(sheet, payload.id);
+      if (prevGoogleId) {
+        deleteGoogleEventById_(prevGoogleId);
+      }
+      deleteRowById_(sheet, payload.id);
+      return jsonOut_({ ok: true });
+    }
+
+    if (action === "replaceAll" && Array.isArray(payload.events)) {
+      const rows = sheet.getDataRange().getValues();
+      const nextIds = new Set(payload.events.map((x) => String(x.id)));
+      for (let i = 1; i < rows.length; i++) {
+        if (rows[i][0] && !nextIds.has(String(rows[i][0])) && rows[i][15]) {
+          deleteGoogleEventById_(String(rows[i][15]));
+        }
+      }
+      const lastRow = sheet.getLastRow();
+      if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+      payload.events.forEach((ev) => {
+        if (ev.syncGoogle !== false && !ev.googleEventId) {
+          ev.googleEventId = sendCalendarInvite_(ev) || "";
+        }
+        upsertRow_(sheet, ev);
+      });
+      return jsonOut_({ ok: true });
+    }
+
+    return jsonOut_({ ok: false, error: "Acción no reconocida" });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function findGoogleEventIdByLocalId_(sheet, id) {
@@ -268,7 +273,7 @@ function sendCalendarInvite_(ev) {
       description: desc,
       location: ev.location || "",
       guests: guests.join(","),
-      sendInvites: true,
+      sendInvites: false,
     };
 
     let created;

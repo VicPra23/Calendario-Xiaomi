@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwkDpPy90QlqWqrrhfCQuaBLyTZcMdkU3YStKBDsF8bavEeNOUqgp7Qo99jqQ_6ItaZ/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzqXWck-owEQJtp35bZR3kOgADmIpu1yNlnTQW97ONpFHsi1EbKvL3WuD43SFZGchUQ/exec";
 
 const STORAGE_KEYS = {
   EVENTS: "cal_xiaomi_events_v1",

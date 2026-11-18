@@ -263,34 +263,32 @@ function sendCalendarInvite_(ev) {
     const cal = CalendarApp.getDefaultCalendar();
     const title = `[${ev.memberId}] ${ev.title}`;
     const desc = `${ev.notes || ""}\n\n(Enviado desde Calendario Training)`;
+    const tz = Session.getScriptTimeZone();
     const opts = {
       description: desc,
       location: ev.location || "",
       guests: guests.join(","),
-      sendInvites: false,
+      sendInvites: true,
     };
 
     let created;
     if (ev.allDay) {
-      const d = Utilities.parseDate(ev.date, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      const d = Utilities.parseDate(ev.date, tz, "yyyy-MM-dd");
       created = cal.createAllDayEvent(title, d, opts);
     } else {
-      const tz = Session.getScriptTimeZone();
       const start = Utilities.parseDate(`${ev.date} ${ev.startTime || "09:30"}`, tz, "yyyy-MM-dd HH:mm");
       const end = Utilities.parseDate(`${ev.date} ${ev.endTime || "11:30"}`, tz, "yyyy-MM-dd HH:mm");
       created = cal.createEvent(title, start, end, opts);
     }
+
     if (created) {
       created.setGuestsCanModify(true);
       created.setGuestsCanInviteOthers(true);
+      if (ev.popupMin && ev.popupMin !== "none") created.addPopupReminder(Number(ev.popupMin));
+      if (ev.emailMin && ev.emailMin !== "none") created.addEmailReminder(Number(ev.emailMin));
+      return created.getId();
     }
-    if (created && ev.popupMin && ev.popupMin !== "none") {
-      created.addPopupReminder(Number(ev.popupMin));
-    }
-    if (created && ev.emailMin && ev.emailMin !== "none") {
-      created.addEmailReminder(Number(ev.emailMin));
-    }
-    return created ? created.getId() : "";
+    return "";
   } catch (err) {
     Logger.log("Error enviando invitación: " + err);
     return "";

@@ -156,23 +156,6 @@ function addDays(date, days) {
   return d;
 }
 
-function getISOWeekYear(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  return d.getUTCFullYear();
-}
-
-function getWeekCornerImageIndex(weekStart, weekNum) {
-  const isoYear = getISOWeekYear(weekStart);
-  const has53Weeks = getISOWeekNumber(new Date(isoYear, 11, 28)) === 53;
-  if (has53Weeks) {
-    if (weekNum === 53) return 52;
-    if (weekNum === 52) return 51;
-  }
-  return Math.min(52, Math.max(1, weekNum));
-}
-
 function getISOWeekNumber(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -955,34 +938,30 @@ function renderTableWeeks() {
 
     const thead = document.createElement("thead");
 
-    // Fila 1: Banner de semana + Ilustración estacional en la esquina superior izquierda
-    const weekImgIdx = getWeekCornerImageIndex(weekStart, weekNum);
-    const weekImgNum = String(weekImgIdx).padStart(2, "0");
+    // Fila 1: Banner de semana
     const trBanner = document.createElement("tr");
     trBanner.innerHTML = `
-      <th rowspan="3" class="corner-season-cell" title="Semana ${weekNum}">
-        <img class="corner-season-img" src="assets/weeks/w${weekImgNum}.jpg" alt="Semana ${weekNum}" loading="lazy" />
-      </th>
+      <th class="corner-empty"></th>
       <th colspan="7" class="week-banner-cell">${monthLabel} · W${weekNum}</th>
     `;
     thead.appendChild(trBanner);
 
     // Fila 2: Letras L M X J V S D
     const trDays = document.createElement("tr");
-    trDays.innerHTML = weekdayLetters
-      .map((l) => `<th class="weekday-header-cell">${l}</th>`)
-      .join("");
+    trDays.innerHTML = `<th class="corner-empty"></th>` +
+      weekdayLetters.map((l) => `<th class="weekday-header-cell">${l}</th>`).join("");
     thead.appendChild(trDays);
 
     // Fila 3: Números del día
     const trNums = document.createElement("tr");
-    trNums.innerHTML = weekDays
-      .map((d) => {
-        const iso = toIsoDate(d);
-        const cls = iso === todayIso ? "date-number-cell is-today" : "date-number-cell";
-        return `<th class="${cls}" title="${iso}">${d.getDate()}</th>`;
-      })
-      .join("");
+    trNums.innerHTML = `<th class="corner-empty"></th>` +
+      weekDays
+        .map((d) => {
+          const iso = toIsoDate(d);
+          const cls = iso === todayIso ? "date-number-cell is-today" : "date-number-cell";
+          return `<th class="${cls}" title="${iso}">${d.getDate()}</th>`;
+        })
+        .join("");
     thead.appendChild(trNums);
     table.appendChild(thead);
 

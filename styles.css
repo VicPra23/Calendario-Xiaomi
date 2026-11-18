@@ -453,29 +453,13 @@ body {
   box-shadow: inset 0 0 0 2px #b45309;
 }
 
-.corner-empty,
-.corner-season-cell {
+.corner-empty {
   background: #ffffff;
   border-bottom: 1.5px solid var(--border-strong) !important;
   position: sticky;
   left: 0;
   z-index: 5;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
-}
-
-.corner-season-cell {
-  padding: 3px !important;
-  vertical-align: middle !important;
-  text-align: center;
-}
-
-.corner-season-img {
-  display: block;
-  width: 74px;
-  height: 68px;
-  margin: 0 auto;
-  object-fit: cover;
-  border-radius: 5px;
 }
 
 .role-cell {

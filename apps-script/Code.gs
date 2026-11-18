@@ -217,11 +217,31 @@ function syncEditsFromGoogleCalendar_(sheet) {
     });
 
     const tz = Session.getScriptTimeZone();
-    for (let i = 1; i < rows.length; i++) {
-      const gId = rows[i][15] ? String(rows[i][15]) : "";
-      if (!gId || !byId[gId]) continue;
+    const minIso = Utilities.formatDate(minDate, tz, "yyyy-MM-dd");
+    const maxIso = Utilities.formatDate(maxDate, tz, "yyyy-MM-dd");
 
-      const ge = byId[gId];
+    for (let i = rows.length - 1; i >= 1; i--) {
+      const gId = rows[i][15] ? String(rows[i][15]) : "";
+      if (!gId) continue;
+
+      let ge = byId[gId] || null;
+      if (!ge) {
+        const rowDateIso = formatDateIso_(rows[i][4]);
+        if (rowDateIso >= minIso && rowDateIso <= maxIso) {
+          // Confirmar que no fue movido fuera del rango antes de borrarlo
+          try {
+            ge = cal.getEventById(gId);
+          } catch (e) {
+            ge = null;
+          }
+          if (!ge) {
+            sheet.deleteRow(i + 1);
+            continue;
+          }
+        } else {
+          continue;
+        }
+      }
       const rawTitle = ge.getTitle() || "";
       const roleMatch = rawTitle.match(/^\[([^\]]+)\]\s*(.*)$/);
       const newTitle = roleMatch ? roleMatch[2] : rawTitle;

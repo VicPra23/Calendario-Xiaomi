@@ -240,6 +240,7 @@ let state = {
   accessToken: null,
   tokenClient: null,
   syncTimer: null,
+  clipboard: null, // { mode: "copy" | "cut", eventId: string }
   viewMode: "auto", // "auto" | "table" | "mobile"
   anchorDate: new Date(), // Se muestra esta semana + las 2 siguientes
   filters: { search: "", members: [], channel: "all" }, // members: [] = Todo el equipo
@@ -703,10 +704,21 @@ function renderMobileWeeks() {
         (isWeekend ? " is-weekend" : "");
       dayHeader.innerHTML = `
         <span>${dayNames[idx]} ${d.getDate()}</span>
-        <button type="button" class="mobile-add-btn">+ Añadir</button>
+        <button type="button" class="mobile-add-btn">${state.clipboard ? "📋 Pegar" : "+ Añadir"}</button>
       `;
-      dayHeader.querySelector(".mobile-add-btn").onclick = () =>
-        openEventModal({ date: iso, memberId: visibleMembers[0]?.id || "COORD" });
+      dayHeader.querySelector(".mobile-add-btn").onclick = () => {
+        const targetMember =
+          state.filters.members.length === 1
+            ? state.filters.members[0]
+            : state.clipboard
+              ? state.events.find((x) => x.id === state.clipboard.eventId)?.memberId || visibleMembers[0]?.id || "COORD"
+              : visibleMembers[0]?.id || "COORD";
+        if (state.clipboard) {
+          pasteClipboardTo(iso, targetMember);
+        } else {
+          openEventModal({ date: iso, memberId: targetMember });
+        }
+      };
       dayCard.appendChild(dayHeader);
 
       const eventsBox = document.createElement("div");
@@ -850,9 +862,20 @@ function renderTableWeeks() {
           (idx >= 5 ? " weekend-cell" : "") +
           (locked ? " day-cell-blocked" : "");
 
+        td.onmouseenter = () => {
+          hoveredCell = { date: iso, memberId: member.id };
+        };
+        td.onmouseleave = () => {
+          if (hoveredCell?.date === iso && hoveredCell?.memberId === member.id) hoveredCell = null;
+        };
+
         td.onclick = (e) => {
           if (locked) {
             showToast(`Día bloqueado para ${member.name}: ${blocked.label}`);
+            return;
+          }
+          if (state.clipboard) {
+            pasteClipboardTo(iso, member.id);
             return;
           }
           if (
@@ -937,13 +960,20 @@ function getFilteredEventsForCell(dateIso, memberId) {
 function renderEventPill(ev) {
   const ch = CHANNELS.find((c) => c.id === ev.channelId) || CHANNELS[0];
   const pill = document.createElement("div");
-  pill.className = "event-pill" + (ev.notes ? " has-notes" : "");
+  const isCut = state.clipboard?.mode === "cut" && state.clipboard.eventId === ev.id;
+  pill.className = "event-pill" + (ev.notes ? " has-notes" : "") + (isCut ? " cut-source" : "");
   pill.style.background = ev.customColor || ch.bg;
   pill.style.color = ev.customColor ? "#ffffff" : ch.fg;
 
   if (!ev.isExternal) {
     pill.draggable = true;
-    pill.title = "Clic para editar · Arrastra (o mantén pulsado en móvil) para mover/copiar/sustituir";
+    pill.title = "Clic para editar · Ctrl+C copiar · Ctrl+X cortar · Arrastrar para mover/copiar";
+    pill.onmouseenter = () => {
+      hoveredEventId = ev.id;
+    };
+    pill.onmouseleave = () => {
+      if (hoveredEventId === ev.id) hoveredEventId = null;
+    };
     pill.ondragstart = (e) => {
       e.dataTransfer.setData("text/plain", ev.id);
       e.dataTransfer.effectAllowed = "copyMove";
@@ -1124,8 +1154,55 @@ function openEventModal(data = {}) {
   toggleTimeInputs();
   document.getElementById("btnDeleteEvent").classList.toggle("hidden", !isEdit);
   document.getElementById("btnCopyEvent").classList.toggle("hidden", !isEdit);
+  document.getElementById("btnCutEvent").classList.toggle("hidden", !isEdit);
   modal.showModal();
   setTimeout(() => document.getElementById("evTitle").focus(), 30);
+}
+
+let hoveredEventId = null;
+let hoveredCell = null;
+
+function setClipboard(mode, eventId) {
+  const ev = state.events.find((x) => x.id === eventId);
+  if (!ev) return;
+  state.clipboard = { mode, eventId };
+  const bar = document.getElementById("clipboardBar");
+  const txt = document.getElementById("clipboardText");
+  if (bar && txt) {
+    txt.textContent =
+      mode === "copy"
+        ? `📋 Copiando "${ev.title}" — Haz clic en cada día donde quieras pegarlo (Esc o Listo para terminar)`
+        : `✂ Cortando "${ev.title}" — Haz clic en el día destino para moverlo`;
+    bar.classList.remove("hidden");
+  }
+  renderWeeks();
+}
+
+function clearClipboard() {
+  if (!state.clipboard) return;
+  state.clipboard = null;
+  document.getElementById("clipboardBar")?.classList.add("hidden");
+  renderWeeks();
+}
+
+async function pasteClipboardTo(targetDate, targetMemberId) {
+  if (!state.clipboard) return;
+  if (isCellLocked(getBlockedInfo(targetDate, targetMemberId))) {
+    showToast(`Día bloqueado por vacaciones para ${targetMemberId}`);
+    return;
+  }
+  const { mode, eventId } = state.clipboard;
+  const orig = state.events.find((x) => x.id === eventId);
+  if (!orig) {
+    clearClipboard();
+    return;
+  }
+  const isCopy = mode === "copy";
+  saveUndoSnapshot(`${isCopy ? "Pegar copia" : "Pegar (cortado)"} "${orig.title}"`);
+  await moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy);
+  if (!isCopy) {
+    clearClipboard();
+  }
 }
 
 let pendingDrop = null;
@@ -1993,17 +2070,34 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   document.getElementById("btnCopyEvent").onclick = () => {
     const currentId = document.getElementById("evId").value;
-    const orig = state.events.find((x) => x.id === currentId);
-    if (!orig) return;
+    if (!currentId) return;
     document.getElementById("eventModal").close();
-    openEventModal({
-      ...orig,
-      id: "",
-      googleEventId: null,
-      googleCalId: null,
-    });
-    document.getElementById("eventModalTitle").textContent = "Copiar evento (elige fecha / persona)";
+    setClipboard("copy", currentId);
   };
+  document.getElementById("btnCutEvent").onclick = () => {
+    const currentId = document.getElementById("evId").value;
+    if (!currentId) return;
+    document.getElementById("eventModal").close();
+    setClipboard("cut", currentId);
+  };
+  document.getElementById("btnCancelClipboard").onclick = clearClipboard;
+
+  document.addEventListener("keydown", (e) => {
+    if (e.target.matches("input, textarea, select")) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === "c" && hoveredEventId) {
+      e.preventDefault();
+      setClipboard("copy", hoveredEventId);
+    } else if (mod && e.key.toLowerCase() === "x" && hoveredEventId) {
+      e.preventDefault();
+      setClipboard("cut", hoveredEventId);
+    } else if (mod && e.key.toLowerCase() === "v" && state.clipboard && hoveredCell) {
+      e.preventDefault();
+      pasteClipboardTo(hoveredCell.date, hoveredCell.memberId);
+    } else if (e.key === "Escape" && state.clipboard) {
+      clearClipboard();
+    }
+  });
   document.getElementById("btnToggleView").onclick = () => {
     state.viewMode = isMobileView() ? "table" : "mobile";
     renderWeeks();

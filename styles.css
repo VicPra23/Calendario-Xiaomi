@@ -490,6 +490,30 @@ body {
   opacity: 0.45;
 }
 
+.event-pill.cut-source {
+  opacity: 0.5;
+  outline: 2px dashed #111827;
+}
+
+.clipboard-bar {
+  position: sticky;
+  top: 62px;
+  z-index: 25;
+  margin: 6px 16px 0;
+  padding: 8px 14px;
+  background: #fef3c7;
+  border: 1.5px solid #d97706;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #92400e;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
 .day-cell.weekend-cell {
   background: #fafafa;
 }

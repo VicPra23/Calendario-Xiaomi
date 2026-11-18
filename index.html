@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=35" />
+  <link rel="stylesheet" href="styles.css?v=36" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -68,6 +68,12 @@
       <div class="legend-items" id="legendItems"></div>
     </div>
   </section>
+
+  <!-- Barra flotante de modo Pegar (para eventos recurrentes en varios días) -->
+  <div id="clipboardBar" class="clipboard-bar hidden">
+    <span id="clipboardText"></span>
+    <button type="button" id="btnCancelClipboard" class="btn btn-secondary">Listo / Salir</button>
+  </div>
 
   <!-- Cuadrícula Semanal (manteniendo el estilo del Calendario Training) -->
   <main class="main-content">
@@ -169,7 +175,8 @@
       </div>
       <div class="modal-footer">
         <button type="button" id="btnDeleteEvent" class="btn btn-danger hidden">Eliminar</button>
-        <button type="button" id="btnCopyEvent" class="btn btn-secondary hidden" title="Crear una copia de este evento">📋 Copiar</button>
+        <button type="button" id="btnCopyEvent" class="btn btn-secondary hidden" title="Copiar para pegar en varios días (Ctrl+C)">📋 Copiar</button>
+        <button type="button" id="btnCutEvent" class="btn btn-secondary hidden" title="Cortar para mover a otro día (Ctrl+X)">✂ Cortar</button>
         <div class="spacer"></div>
         <button type="button" class="btn btn-secondary" data-close="eventModal">Cancelar</button>
         <button type="submit" id="btnSaveEvent" class="btn btn-primary">Guardar evento</button>
@@ -278,6 +285,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=35"></script>
+  <script src="app.js?v=36"></script>
 </body>
 </html>

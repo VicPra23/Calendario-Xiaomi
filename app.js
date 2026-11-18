@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw1mvttA3Hdnkczl97aQXqkpLyZ3tBn_Vpy-bzE-nIbOEGEA7XgTfIE8sXeXR1Ea3qv/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxPSEE3jj_xVyCEkrZ_piL0vvOHjh1xD41z89uMux1ijPEnqIuGeZK-DyJC6Az2JwS0/exec";
 
 const STORAGE_KEYS = {
   EVENTS: "cal_xiaomi_events_v1",
@@ -381,20 +381,24 @@ async function syncFromAppsScript(silent = false) {
 }
 
 async function postToAppsScript(payload) {
-  if (!APPS_SCRIPT_URL) return false;
+  if (!APPS_SCRIPT_URL) return null;
   pendingSyncWrites++;
   lastWriteTimestamp = Date.now();
   try {
-    await fetch(APPS_SCRIPT_URL, {
+    const res = await fetch(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(payload),
     });
     lastWriteTimestamp = Date.now();
-    return true;
+    try {
+      return await res.json();
+    } catch {
+      return { ok: true };
+    }
   } catch (err) {
     console.warn("Error enviando cambio a Apps Script:", err);
-    return false;
+    return null;
   } finally {
     pendingSyncWrites = Math.max(0, pendingSyncWrites - 1);
   }
@@ -1342,10 +1346,15 @@ async function moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy) {
   }
 
   saveEvents();
-  if (APPS_SCRIPT_URL) {
-    postToAppsScript({ action: "upsert", event: updated });
-  }
   renderWeeks();
+  if (APPS_SCRIPT_URL) {
+    postToAppsScript({ action: "upsert", event: updated }).then((res) => {
+      if (res?.googleEventId) {
+        updated.googleEventId = res.googleEventId;
+        saveEvents();
+      }
+    });
+  }
 }
 
 function renderGroupAttendeeChips(primaryMemberId, selectedIds = []) {
@@ -1428,9 +1437,13 @@ async function handleSaveEvent(e) {
 
     if (APPS_SCRIPT_URL) {
       showToast("Guardando evento y enviando alerta...");
-      const sent = await postToAppsScript({ action: "upsert", event: ev });
+      const res = await postToAppsScript({ action: "upsert", event: ev });
+      if (res?.googleEventId) {
+        ev.googleEventId = res.googleEventId;
+        saveEvents();
+      }
       showToast(
-        sent
+        res?.ok
           ? "Evento guardado para todo el grupo y alerta enviada."
           : "Guardado localmente (error de red al sincronizar)."
       );
@@ -1468,7 +1481,7 @@ async function handleDeleteEvent() {
   if (!ev) return;
 
   if (APPS_SCRIPT_URL) {
-    await postToAppsScript({ action: "delete", id });
+    await postToAppsScript({ action: "delete", id, googleEventId: ev.googleEventId || null });
   } else if (ev.googleEventId && state.accessToken) {
     try {
       const calId = encodeURIComponent(ev.googleCalId || "primary");

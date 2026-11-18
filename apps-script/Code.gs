@@ -108,7 +108,7 @@ function doPost(e) {
     }
 
     if (action === "delete" && payload.id) {
-      const prevGoogleId = findGoogleEventIdByLocalId_(sheet, payload.id);
+      const prevGoogleId = findGoogleEventIdByLocalId_(sheet, payload.id) || payload.googleEventId;
       if (prevGoogleId) {
         deleteGoogleEventById_(prevGoogleId);
       }
@@ -209,7 +209,22 @@ function deleteGoogleEventById_(googleEventId) {
   try {
     const cal = CalendarApp.getDefaultCalendar();
     const gEv = cal.getEventById(googleEventId);
-    if (gEv) gEv.deleteEvent();
+    if (gEv) {
+      gEv.deleteEvent();
+      return;
+    }
+    // Respaldo por si el ID requiere búsqueda en rango
+    const now = new Date();
+    const events = cal.getEvents(
+      new Date(now.getFullYear(), now.getMonth() - 2, 1),
+      new Date(now.getFullYear(), now.getMonth() + 6, 0)
+    );
+    for (let i = 0; i < events.length; i++) {
+      if (events[i].getId() === googleEventId) {
+        events[i].deleteEvent();
+        return;
+      }
+    }
   } catch (err) {
     Logger.log("No se pudo borrar evento previo de Google Calendar: " + err);
   }

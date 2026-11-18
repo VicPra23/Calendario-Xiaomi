@@ -55,6 +55,7 @@ function getEventsSheet_() {
 
 function doGet() {
   const sheet = getEventsSheet_();
+  syncEditsFromGoogleCalendar_(sheet);
   const rows = sheet.getDataRange().getValues();
   const events = [];
   for (let i = 1; i < rows.length; i++) {
@@ -66,8 +67,8 @@ function doGet() {
       memberId: String(r[2] || "COORD"),
       channelId: String(r[3] || "open_market"),
       date: formatDateIso_(r[4]),
-      startTime: String(r[5] || "09:30"),
-      endTime: String(r[6] || "11:30"),
+      startTime: formatTimeHhMm_(r[5], "09:30"),
+      endTime: formatTimeHhMm_(r[6], "11:30"),
       allDay: r[7] === true || r[7] === "true",
       location: String(r[8] || ""),
       notes: String(r[9] || ""),
@@ -145,6 +146,59 @@ function findGoogleEventIdByLocalId_(sheet, id) {
   return null;
 }
 
+function syncEditsFromGoogleCalendar_(sheet) {
+  try {
+    const rows = sheet.getDataRange().getValues();
+    if (rows.length <= 1) return;
+
+    const now = new Date();
+    const minDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const maxDate = new Date(now.getFullYear(), now.getMonth() + 4, 0);
+    const cal = CalendarApp.getDefaultCalendar();
+    const gEvents = cal.getEvents(minDate, maxDate);
+    const byId = {};
+    gEvents.forEach((ge) => {
+      byId[ge.getId()] = ge;
+    });
+
+    const tz = Session.getScriptTimeZone();
+    for (let i = 1; i < rows.length; i++) {
+      const gId = rows[i][15] ? String(rows[i][15]) : "";
+      if (!gId || !byId[gId]) continue;
+
+      const ge = byId[gId];
+      const rawTitle = ge.getTitle() || "";
+      const roleMatch = rawTitle.match(/^\[([^\]]+)\]\s*(.*)$/);
+      const newTitle = roleMatch ? roleMatch[2] : rawTitle;
+      const newAllDay = ge.isAllDayEvent();
+      const newDate = Utilities.formatDate(ge.getStartTime(), tz, "yyyy-MM-dd");
+      const newStart = newAllDay ? "09:30" : Utilities.formatDate(ge.getStartTime(), tz, "HH:mm");
+      const newEnd = newAllDay ? "11:30" : Utilities.formatDate(ge.getEndTime(), tz, "HH:mm");
+      const newLoc = ge.getLocation() || "";
+
+      const changed =
+        newTitle !== String(rows[i][1] || "") ||
+        newDate !== formatDateIso_(rows[i][4]) ||
+        newStart !== String(rows[i][5] || "") ||
+        newEnd !== String(rows[i][6] || "") ||
+        newAllDay !== (rows[i][7] === true || rows[i][7] === "true") ||
+        newLoc !== String(rows[i][8] || "");
+
+      if (changed) {
+        sheet.getRange(i + 1, 2).setValue(newTitle);
+        sheet.getRange(i + 1, 5).setValue(newDate);
+        sheet.getRange(i + 1, 6).setValue(newStart);
+        sheet.getRange(i + 1, 7).setValue(newEnd);
+        sheet.getRange(i + 1, 8).setValue(newAllDay);
+        sheet.getRange(i + 1, 9).setValue(newLoc);
+        sheet.getRange(i + 1, 15).setValue(new Date().toISOString());
+      }
+    }
+  } catch (err) {
+    Logger.log("Error sincronizando ediciones desde Google Calendar: " + err);
+  }
+}
+
 function deleteGoogleEventById_(googleEventId) {
   if (!googleEventId) return;
   try {
@@ -213,7 +267,7 @@ function sendCalendarInvite_(ev) {
       description: desc,
       location: ev.location || "",
       guests: guests.join(","),
-      sendInvites: true,
+      sendInvites: false,
     };
 
     let created;
@@ -225,6 +279,10 @@ function sendCalendarInvite_(ev) {
       const start = Utilities.parseDate(`${ev.date} ${ev.startTime || "09:30"}`, tz, "yyyy-MM-dd HH:mm");
       const end = Utilities.parseDate(`${ev.date} ${ev.endTime || "11:30"}`, tz, "yyyy-MM-dd HH:mm");
       created = cal.createEvent(title, start, end, opts);
+    }
+    if (created) {
+      created.setGuestsCanModify(true);
+      created.setGuestsCanInviteOthers(true);
     }
     if (created && ev.popupMin && ev.popupMin !== "none") {
       created.addPopupReminder(Number(ev.popupMin));
@@ -325,6 +383,14 @@ function formatDateIso_(val) {
     return Utilities.formatDate(val, Session.getScriptTimeZone(), "yyyy-MM-dd");
   }
   return String(val || "").slice(0, 10);
+}
+
+function formatTimeHhMm_(val, fallback) {
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, Session.getScriptTimeZone(), "HH:mm");
+  }
+  const m = String(val || "").match(/(\d{1,2}:\d{2})/);
+  return m ? m[1].padStart(5, "0") : fallback;
 }
 
 function jsonOut_(obj) {

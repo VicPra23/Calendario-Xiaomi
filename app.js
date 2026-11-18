@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxArZgpQhARjSXKqhQN4MKKoN29_Y_0-xIx29fbBY5-2Zze-W0oZHYwQ8qPpECptgYg/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwkDpPy90QlqWqrrhfCQuaBLyTZcMdkU3YStKBDsF8bavEeNOUqgp7Qo99jqQ_6ItaZ/exec";
 
 const STORAGE_KEYS = {
   EVENTS: "cal_xiaomi_events_v1",
@@ -246,6 +246,18 @@ let state = {
 };
 
 /* ---------- Utilidades de Fechas (ISO Week, Lunes a Domingo) ---------- */
+function normalizeTimeStr(t, fallback = "") {
+  if (!t) return fallback;
+  const s = String(t);
+  const m = s.match(/(\d{1,2}:\d{2})/);
+  if (m) return m[1].padStart(5, "0");
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  return fallback;
+}
+
 function toIsoDate(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -943,7 +955,7 @@ function renderEventPill(ev) {
     attachTouchDrag(pill, ev);
   }
 
-  const timeStr = ev.allDay ? "" : `${ev.startTime || ""}`;
+  const timeStr = ev.allDay ? "" : normalizeTimeStr(ev.startTime);
   const syncBadge = ev.googleEventId ? "G" : "";
   const extBadge = ev.isExternal ? `<span class="ext-badge">${escapeHtml(ev.sourceName || "EXT")}</span>` : "";
 
@@ -1074,8 +1086,8 @@ function openEventModal(data = {}) {
   document.getElementById("evMember").value = data.memberId || state.team[0]?.id || "COORD";
   document.getElementById("evChannel").value = data.channelId || "open_market";
   document.getElementById("evDate").value = data.date || toIsoDate(new Date());
-  document.getElementById("evStartTime").value = data.startTime || "09:30";
-  document.getElementById("evEndTime").value = data.endTime || "11:30";
+  document.getElementById("evStartTime").value = normalizeTimeStr(data.startTime, "09:30");
+  document.getElementById("evEndTime").value = normalizeTimeStr(data.endTime, "11:30");
   document.getElementById("evAllDay").checked = Boolean(data.allDay);
   document.getElementById("evLocation").value = data.location || "";
   document.getElementById("evNotes").value = data.notes || "";

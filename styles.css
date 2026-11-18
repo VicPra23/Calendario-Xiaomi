@@ -455,13 +455,25 @@ body {
 }
 
 .day-cell {
-  padding: 2px;
-  min-height: 54px;
-  height: 58px;
+  padding: 3px 3px 22px;
+  min-height: 74px;
+  height: 74px;
   background: #ffffff;
   border-bottom: 1.5px solid var(--border-strong) !important;
   cursor: pointer;
+  position: relative;
   transition: background 0.1s;
+}
+
+.day-cell:not(.day-cell-blocked):hover::after {
+  content: "+ Añadir";
+  position: absolute;
+  bottom: 3px;
+  right: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #6b7280;
+  pointer-events: none;
 }
 
 .day-cell:hover {

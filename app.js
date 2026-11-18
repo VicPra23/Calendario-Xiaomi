@@ -1291,66 +1291,87 @@ function toggleTimeInputs() {
   document.getElementById("evEndTime").disabled = allDay;
 }
 
+let isSavingEvent = false;
+
 async function handleSaveEvent(e) {
   e.preventDefault();
-  const id = document.getElementById("evId").value || `ev-${Date.now()}`;
-  const ev = {
-    id,
-    googleEventId: document.getElementById("evGoogleId").value || null,
-    googleCalId: document.getElementById("evGoogleCalId").value || null,
-    title: document.getElementById("evTitle").value.trim(),
-    memberId: document.getElementById("evMember").value,
-    channelId: document.getElementById("evChannel").value,
-    date: document.getElementById("evDate").value,
-    startTime: document.getElementById("evStartTime").value,
-    endTime: document.getElementById("evEndTime").value,
-    allDay: document.getElementById("evAllDay").checked,
-    location: "",
-    notes: document.getElementById("evNotes").value.trim(),
-    popupMin: document.getElementById("evReminderPopup").value,
-    emailMin: document.getElementById("evEnableEmailAlert").checked
-      ? document.getElementById("evReminderEmail").value
-      : "none",
-    syncGoogle: document.getElementById("evSyncGoogle").checked,
-    groupAttendees: Array.from(
-      document.querySelectorAll("#evGroupAttendees input:checked")
-    ).map((cb) => cb.value),
-  };
+  if (isSavingEvent) return;
+  isSavingEvent = true;
 
-  // Sincronizar con Apps Script compartido (si está configurado) o abrir plantilla Google Calendar
-  if (APPS_SCRIPT_URL) {
-    const sent = await postToAppsScript({ action: "upsert", event: ev });
-    showToast(
-      sent
-        ? "Evento guardado para todo el grupo y alerta enviada."
-        : "Guardado localmente (error de red al sincronizar)."
-    );
-  } else if (ev.syncGoogle && state.accessToken) {
-    try {
-      const synced = await upsertGoogleCalendarEvent(ev);
-      ev.googleEventId = synced.id;
-      ev.googleCalId = state.googleCfg.primaryCalendarId || "primary";
-      showToast("Evento guardado y enviado a Google Calendar (alertas activas)");
-    } catch (err) {
-      console.error(err);
-      showToast("Guardado localmente, pero falló envío a Google: " + err.message);
-    }
-  } else if (ev.syncGoogle && !state.accessToken) {
-    // Sin OAuth configurado: abrimos Google Calendar pre-rellenado con los correos del grupo marcados
-    const gcalUrl = buildGoogleCalendarTemplateUrl(ev);
-    window.open(gcalUrl, "_blank", "noopener,noreferrer");
-    showToast("Evento guardado. Se abrió Google Calendar para enviar la alerta al grupo.");
-  } else {
-    showToast("Evento guardado localmente.");
+  const saveBtn = document.getElementById("btnSaveEvent");
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Guardando...";
   }
 
-  const idx = state.events.findIndex((item) => item.id === id);
-  if (idx >= 0) state.events[idx] = ev;
-  else state.events.push(ev);
+  try {
+    const id = document.getElementById("evId").value || `ev-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const ev = {
+      id,
+      googleEventId: document.getElementById("evGoogleId").value || null,
+      googleCalId: document.getElementById("evGoogleCalId").value || null,
+      title: document.getElementById("evTitle").value.trim(),
+      memberId: document.getElementById("evMember").value,
+      channelId: document.getElementById("evChannel").value,
+      date: document.getElementById("evDate").value,
+      startTime: document.getElementById("evStartTime").value,
+      endTime: document.getElementById("evEndTime").value,
+      allDay: document.getElementById("evAllDay").checked,
+      location: "",
+      notes: document.getElementById("evNotes").value.trim(),
+      popupMin: document.getElementById("evReminderPopup").value,
+      emailMin: document.getElementById("evEnableEmailAlert").checked
+        ? document.getElementById("evReminderEmail").value
+        : "none",
+      syncGoogle: document.getElementById("evSyncGoogle").checked,
+      groupAttendees: Array.from(
+        document.querySelectorAll("#evGroupAttendees input:checked")
+      ).map((cb) => cb.value),
+    };
 
-  saveEvents();
-  document.getElementById("eventModal").close();
-  renderWeeks();
+    // Guardado optimista inmediato: cierra el modal al instante para evitar dobles clics
+    const idx = state.events.findIndex((item) => item.id === id);
+    if (idx >= 0) state.events[idx] = ev;
+    else state.events.push(ev);
+
+    saveEvents();
+    document.getElementById("eventModal").close();
+    renderWeeks();
+
+    if (APPS_SCRIPT_URL) {
+      showToast("Guardando evento y enviando alerta...");
+      const sent = await postToAppsScript({ action: "upsert", event: ev });
+      showToast(
+        sent
+          ? "Evento guardado para todo el grupo y alerta enviada."
+          : "Guardado localmente (error de red al sincronizar)."
+      );
+    } else if (ev.syncGoogle && state.accessToken) {
+      try {
+        const synced = await upsertGoogleCalendarEvent(ev);
+        ev.googleEventId = synced.id;
+        ev.googleCalId = state.googleCfg.primaryCalendarId || "primary";
+        saveEvents();
+        renderWeeks();
+        showToast("Evento guardado y enviado a Google Calendar (alertas activas)");
+      } catch (err) {
+        console.error(err);
+        showToast("Guardado localmente, pero falló envío a Google: " + err.message);
+      }
+    } else if (ev.syncGoogle && !state.accessToken) {
+      const gcalUrl = buildGoogleCalendarTemplateUrl(ev);
+      window.open(gcalUrl, "_blank", "noopener,noreferrer");
+      showToast("Evento guardado. Se abrió Google Calendar para enviar la alerta al grupo.");
+    } else {
+      showToast("Evento guardado localmente.");
+    }
+  } finally {
+    isSavingEvent = false;
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Guardar evento";
+    }
+  }
 }
 
 async function handleDeleteEvent() {

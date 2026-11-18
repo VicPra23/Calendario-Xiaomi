@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=33" />
+  <link rel="stylesheet" href="styles.css?v=34" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -172,7 +172,7 @@
         <button type="button" id="btnCopyEvent" class="btn btn-secondary hidden" title="Crear una copia de este evento">📋 Copiar</button>
         <div class="spacer"></div>
         <button type="button" class="btn btn-secondary" data-close="eventModal">Cancelar</button>
-        <button type="submit" class="btn btn-primary">Guardar evento</button>
+        <button type="submit" id="btnSaveEvent" class="btn btn-primary">Guardar evento</button>
       </div>
     </form>
   </dialog>
@@ -278,6 +278,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=33"></script>
+  <script src="app.js?v=34"></script>
 </body>
 </html>

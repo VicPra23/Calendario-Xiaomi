@@ -228,13 +228,19 @@ function syncEditsFromGoogleCalendar_(sheet) {
       if (!ge) {
         const rowDateIso = formatDateIso_(rows[i][4]);
         if (rowDateIso >= minIso && rowDateIso <= maxIso) {
-          // Confirmar que no fue movido fuera del rango antes de borrarlo
+          // Si no aparece en getEvents(min, max), comprobamos si fue movido fuera del rango;
+          // si getEventById devuelve null O su fecha sigue dentro del rango, significa que está en la Papelera (borrado)
           try {
             ge = cal.getEventById(gId);
           } catch (e) {
             ge = null;
           }
           if (!ge) {
+            sheet.deleteRow(i + 1);
+            continue;
+          }
+          const geIso = Utilities.formatDate(ge.getStartTime(), tz, "yyyy-MM-dd");
+          if (geIso >= minIso && geIso <= maxIso) {
             sheet.deleteRow(i + 1);
             continue;
           }

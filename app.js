@@ -1087,12 +1087,21 @@ function openEventModal(data = {}) {
   document.getElementById("evChannel").value = data.channelId || "open_market";
   document.getElementById("evDate").value = data.date || toIsoDate(new Date());
   document.getElementById("evStartTime").value = normalizeTimeStr(data.startTime, "09:30");
-  document.getElementById("evEndTime").value = normalizeTimeStr(data.endTime, "11:30");
+  document.getElementById("evEndTime").value = normalizeTimeStr(
+    data.endTime,
+    addOneHour(document.getElementById("evStartTime").value)
+  );
   document.getElementById("evAllDay").checked = Boolean(data.allDay);
-  document.getElementById("evLocation").value = data.location || "";
   document.getElementById("evNotes").value = data.notes || "";
   document.getElementById("evReminderPopup").value = data.popupMin ?? "60";
-  document.getElementById("evReminderEmail").value = data.emailMin ?? "1440";
+
+  const hasEmailAlert = Boolean(data.emailMin && data.emailMin !== "none");
+  const emailCb = document.getElementById("evEnableEmailAlert");
+  const emailSel = document.getElementById("evReminderEmail");
+  emailCb.checked = hasEmailAlert;
+  emailSel.disabled = !hasEmailAlert;
+  emailSel.value = hasEmailAlert ? String(data.emailMin) : "60";
+
   document.getElementById("evSyncGoogle").checked = data.syncGoogle !== false;
 
   // Renderizar solo miembros del grupo (nunca invitados externos)
@@ -1268,6 +1277,14 @@ function renderGroupAttendeeChips(primaryMemberId, selectedIds = []) {
   });
 }
 
+function addOneHour(hhmm) {
+  const [h, m] = String(hhmm || "09:30").split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return "10:30";
+  const nextH = Math.min(23, h + 1);
+  const nextM = h >= 23 ? 59 : m;
+  return `${String(nextH).padStart(2, "0")}:${String(nextM).padStart(2, "0")}`;
+}
+
 function toggleTimeInputs() {
   const allDay = document.getElementById("evAllDay").checked;
   document.getElementById("evStartTime").disabled = allDay;
@@ -1288,10 +1305,12 @@ async function handleSaveEvent(e) {
     startTime: document.getElementById("evStartTime").value,
     endTime: document.getElementById("evEndTime").value,
     allDay: document.getElementById("evAllDay").checked,
-    location: document.getElementById("evLocation").value.trim(),
+    location: "",
     notes: document.getElementById("evNotes").value.trim(),
     popupMin: document.getElementById("evReminderPopup").value,
-    emailMin: document.getElementById("evReminderEmail").value,
+    emailMin: document.getElementById("evEnableEmailAlert").checked
+      ? document.getElementById("evReminderEmail").value
+      : "none",
     syncGoogle: document.getElementById("evSyncGoogle").checked,
     groupAttendees: Array.from(
       document.querySelectorAll("#evGroupAttendees input:checked")
@@ -1980,6 +1999,12 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("evMemberDateRow").classList.remove("hidden");
   };
   document.getElementById("evAllDay").onchange = toggleTimeInputs;
+  document.getElementById("evStartTime").onchange = (e) => {
+    document.getElementById("evEndTime").value = addOneHour(e.target.value);
+  };
+  document.getElementById("evEnableEmailAlert").onchange = (e) => {
+    document.getElementById("evReminderEmail").disabled = !e.target.checked;
+  };
   document.getElementById("eventForm").onsubmit = handleSaveEvent;
   document.getElementById("btnDeleteEvent").onclick = handleDeleteEvent;
   document.getElementById("btnDropCopy").onclick = () => executeDropAction("copy");

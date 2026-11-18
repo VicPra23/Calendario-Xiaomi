@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=32" />
+  <link rel="stylesheet" href="styles.css?v=33" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -114,7 +114,7 @@
             <input type="time" id="evStartTime" value="09:30" />
           </label>
           <label>Hora fin
-            <input type="time" id="evEndTime" value="11:30" />
+            <input type="time" id="evEndTime" value="10:30" />
           </label>
         </div>
 
@@ -126,14 +126,8 @@
         </div>
 
         <div class="form-row">
-          <label>Ubicación / Tienda / Enlace Teams
-            <input type="text" id="evLocation" placeholder="Ej: CC Xanadú / Enlace Google Meet / Teams" />
-          </label>
-        </div>
-
-        <div class="form-row">
           <label>Notas / Comentarios
-            <textarea id="evNotes" rows="2" placeholder="Detalles adicionales, material necesario, contacto..."></textarea>
+            <textarea id="evNotes" rows="2" placeholder="Detalles adicionales, tienda, enlace, material, contacto..."></textarea>
           </label>
         </div>
 
@@ -149,14 +143,19 @@
                 <option value="1440">1 día antes (24h)</option>
               </select>
             </label>
-            <label>Alerta por Correo (Gmail)
-              <select id="evReminderEmail">
-                <option value="none">Sin correo</option>
-                <option value="60">1 hora antes</option>
-                <option value="1440" selected>1 día antes (24h)</option>
+            <div class="email-alert-optional">
+              <label class="checkbox-label">
+                <input type="checkbox" id="evEnableEmailAlert" />
+                Alerta por Correo (opcional)
+              </label>
+              <select id="evReminderEmail" disabled>
+                <option value="15">15 minutos antes</option>
+                <option value="30">30 minutos antes</option>
+                <option value="60" selected>1 hora antes</option>
+                <option value="1440">1 día antes (24h)</option>
                 <option value="2880">2 días antes</option>
               </select>
-            </label>
+            </div>
           </div>
           <label class="checkbox-label">
             <input type="checkbox" id="evSyncGoogle" checked />
@@ -279,6 +278,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=32"></script>
+  <script src="app.js?v=33"></script>
 </body>
 </html>

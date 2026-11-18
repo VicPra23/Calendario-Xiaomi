@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=47" />
+  <link rel="stylesheet" href="styles.css?v=52" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -61,7 +61,8 @@
         <button id="btnToggleView" class="btn btn-secondary" title="Cambiar entre vista tabla y vista móvil">📱 Vista</button>
         <button id="btnUndo" class="btn btn-secondary hidden" title="Deshacer último cambio">↶ Deshacer</button>
         <button id="btnTeam" class="btn btn-secondary">👥 Equipo</button>
-        <button id="btnExportIcs" class="btn btn-secondary" title="Descargar eventos de la vista en .ICS">⬇ .ICS</button>
+        <button id="btnExportIcs" class="btn btn-secondary" title="Descargar eventos filtrados de la vista actual en .ICS">⬇ .ICS vista</button>
+        <button id="btnExportIcsAll" class="btn btn-secondary" title="Descargar todos los eventos del calendario en .ICS">⬇ .ICS todo</button>
       </div>
     </div>
   </header>
@@ -78,6 +79,12 @@
   <div id="clipboardBar" class="clipboard-bar hidden">
     <span id="clipboardText"></span>
     <button type="button" id="btnCancelClipboard" class="btn btn-secondary">Listo / Salir</button>
+  </div>
+
+  <!-- Barra de cambios pendientes o con error de sincronización -->
+  <div id="syncSummaryBar" class="sync-summary-bar hidden" role="status" aria-live="polite">
+    <span id="syncSummaryText"></span>
+    <button type="button" id="btnRetryAllSync" class="btn btn-primary">Reintentar ahora</button>
   </div>
 
   <!-- Cuadrícula Semanal (manteniendo el estilo del Calendario Training) -->
@@ -119,15 +126,29 @@
 
         <div class="form-grid-3">
           <label>Canal (Color) *
-            <select id="evChannel" required></select>
+            <div class="channel-select-wrap">
+              <span id="evChannelDot" class="channel-color-dot" aria-hidden="true"></span>
+              <select id="evChannel" required></select>
+            </div>
           </label>
           <label>Hora inicio
-            <input type="time" id="evStartTime" value="09:30" />
+            <div class="time-field" id="evStartTimeField">
+              <input type="time" id="evStartTime" class="time-input" value="09:30" />
+              <button type="button" class="time-picker-btn" data-time-target="evStartTime" title="Elegir hora rápida" aria-label="Elegir hora de inicio">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+              </button>
+            </div>
           </label>
           <label>Hora fin
-            <input type="time" id="evEndTime" value="10:30" />
+            <div class="time-field" id="evEndTimeField">
+              <input type="time" id="evEndTime" class="time-input" value="10:30" />
+              <button type="button" class="time-picker-btn" data-time-target="evEndTime" title="Elegir hora rápida" aria-label="Elegir hora de fin">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+              </button>
+            </div>
           </label>
         </div>
+        <div id="quickTimePopover" class="quick-time-popover hidden" role="dialog" aria-label="Selector rápido de hora"></div>
 
         <div class="form-row checkbox-row">
           <label class="checkbox-label">
@@ -288,8 +309,25 @@
     </div>
   </dialog>
 
+  <!-- Modal: Confirmar disponibilidad / solapamiento / festivo -->
+  <dialog id="availabilityModal" class="modal modal-compact">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>⚠️ Aviso de disponibilidad</h2>
+        <button type="button" class="btn-icon" id="btnAvailabilityClose" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="availabilityMessage" class="help-text"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnAvailabilityCancel">Revisar</button>
+        <button type="button" class="btn btn-primary" id="btnAvailabilityConfirm">Guardar de todas formas</button>
+      </div>
+    </div>
+  </dialog>
+
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=47"></script>
+  <script src="app.js?v=52"></script>
 </body>
 </html>

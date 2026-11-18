@@ -453,13 +453,29 @@ body {
   box-shadow: inset 0 0 0 2px #b45309;
 }
 
-.corner-empty {
+.corner-empty,
+.corner-season-cell {
   background: #ffffff;
   border-bottom: 1.5px solid var(--border-strong) !important;
   position: sticky;
   left: 0;
   z-index: 5;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
+}
+
+.corner-season-cell {
+  padding: 3px !important;
+  vertical-align: middle !important;
+  text-align: center;
+}
+
+.corner-season-img {
+  display: block;
+  width: 74px;
+  height: 68px;
+  margin: 0 auto;
+  object-fit: cover;
+  border-radius: 5px;
 }
 
 .role-cell {
@@ -547,6 +563,28 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
+.sync-summary-bar {
+  margin: 6px 16px 0;
+  padding: 8px 14px;
+  background: #fff7ed;
+  border: 1.5px solid #ea580c;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9a3412;
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.12);
+}
+
+.sync-summary-bar.is-error {
+  background: #fef2f2;
+  border-color: #dc2626;
+  color: #991b1b;
+}
+
 .day-cell.weekend-cell {
   background: #fafafa;
 }
@@ -607,6 +645,30 @@ body {
 
 .event-pill:hover {
   filter: brightness(0.95);
+}
+
+.event-pill:focus-visible,
+.cell-add-hint:focus-visible,
+.mobile-add-btn:focus-visible,
+.btn:focus-visible,
+.btn-icon:focus-visible {
+  outline: 2px solid #ff6900;
+  outline-offset: 2px;
+}
+
+.event-sync-chip {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  background: rgba(15, 23, 42, 0.72);
+  color: #ffffff;
+}
+
+.event-sync-chip.is-error {
+  background: #dc2626;
 }
 
 .event-pill.has-notes::after {
@@ -716,11 +778,209 @@ dialog.modal::backdrop {
 .modal-body select,
 .modal-body textarea {
   border: 1px solid #d1d5db;
-  border-radius: 6px;
-  padding: 7px 9px;
+  border-radius: 8px;
+  padding: 8px 10px;
   font-size: 13px;
   font-family: inherit;
-  font-weight: 400;
+  font-weight: 500;
+  color: #111827;
+  background-color: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.modal-body input[type="text"]:hover,
+.modal-body input[type="email"]:hover,
+.modal-body input[type="date"]:hover,
+.modal-body select:hover,
+.modal-body textarea:hover {
+  border-color: #9ca3af;
+}
+
+.modal-body input[type="text"]:focus,
+.modal-body input[type="email"]:focus,
+.modal-body input[type="date"]:focus,
+.modal-body select:focus,
+.modal-body textarea:focus {
+  outline: none;
+  border-color: #ff6900;
+  box-shadow: 0 0 0 3px rgba(255, 105, 0, 0.14);
+}
+
+/* Selector de Canal con indicador de color integrado */
+.channel-select-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.channel-color-dot {
+  position: absolute;
+  left: 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: #9ca3af;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+}
+
+.channel-select-wrap select {
+  width: 100%;
+  padding-left: 26px;
+}
+
+/* Campo de hora compacto con botón de reloj junto a los dígitos */
+.time-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 4px 6px 4px 10px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.time-field:hover {
+  border-color: #9ca3af;
+}
+
+.time-field:focus-within {
+  border-color: #ff6900;
+  box-shadow: 0 0 0 3px rgba(255, 105, 0, 0.14);
+}
+
+.time-field.disabled {
+  background: #f3f4f6;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.modal-body .time-field input.time-input {
+  border: none;
+  box-shadow: none;
+  padding: 3px 0;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.modal-body .time-field input.time-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.modal-body .time-field input.time-input::-webkit-calendar-picker-indicator {
+  display: none;
+}
+
+.time-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #f3f4f6;
+  color: #374151;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.time-picker-btn:hover:not(:disabled) {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #ea580c;
+}
+
+.time-picker-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Popover rápido de hora */
+.quick-time-popover {
+  position: fixed;
+  z-index: 250;
+  width: 248px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick-time-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+
+.quick-time-steppers,
+.quick-time-durations {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.quick-time-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  max-height: 176px;
+  overflow-y: auto;
+}
+
+.qt-btn {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f9fafb;
+  color: #1f2937;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 5px 4px;
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+}
+
+.qt-btn:hover {
+  background: #fff7ed;
+  border-color: #fb923c;
+  color: #c2410c;
+}
+
+.qt-btn.active {
+  background: #ff6900;
+  border-color: #ea580c;
+  color: #ffffff;
+}
+
+.qt-btn.qt-accent {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.qt-btn.qt-accent:hover {
+  background: #dbeafe;
+  border-color: #60a5fa;
 }
 
 .form-grid-2 {
@@ -898,25 +1158,58 @@ dialog.modal::backdrop {
 .group-attendees-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 7px;
 }
 
-.group-chip {
+.modal-body label.group-chip {
   display: inline-flex;
+  flex-direction: row;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  font-size: 11px;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  font-size: 12px;
   font-weight: 600;
+  color: #1e293b;
   cursor: pointer;
+  user-select: none;
+  transition: transform 0.1s ease, box-shadow 0.12s ease, border-color 0.12s ease, background 0.12s ease;
 }
 
-.group-chip.disabled {
+.modal-body label.group-chip:hover:not(.disabled) {
+  border-color: #94a3b8;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(15, 23, 42, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.modal-body label.group-chip:active:not(.disabled) {
+  transform: translateY(0);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+.modal-body label.group-chip:has(input:checked) {
+  border-color: #ff6900;
+  background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
+  color: #9a3412;
+  box-shadow: 0 1px 3px rgba(255, 105, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.modal-body label.group-chip input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: #ff6900;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.modal-body label.group-chip.disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 /* Vista Móvil (Tarjetas por día manteniendo estilo dorado y colores de canal) */

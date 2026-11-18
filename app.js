@@ -7,6 +7,7 @@ const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxD
 
 const STORAGE_KEYS = {
   EVENTS: "cal_xiaomi_events_v2",
+  OUTBOX: "cal_xiaomi_outbox_v1",
   TEAM: "cal_xiaomi_team_v1",
   EXT_CALENDARS: "cal_xiaomi_ext_cals_v1",
   GOOGLE_CFG: "cal_xiaomi_google_cfg_v1",
@@ -101,6 +102,7 @@ const SEED_EVENTS = [];
 // Estado de la aplicación
 let state = {
   events: [],
+  outbox: {}, // id -> { action, id, event, revision, status, error }
   externalEvents: [],
   blockedDays: {}, // key: "memberId|YYYY-MM-DD" -> { type, label }
   team: [],
@@ -152,6 +154,23 @@ function addDays(date, days) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   d.setDate(d.getDate() + days);
   return d;
+}
+
+function getISOWeekYear(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  return d.getUTCFullYear();
+}
+
+function getWeekCornerImageIndex(weekStart, weekNum) {
+  const isoYear = getISOWeekYear(weekStart);
+  const has53Weeks = getISOWeekNumber(new Date(isoYear, 11, 28)) === 53;
+  if (has53Weeks) {
+    if (weekNum === 53) return 52;
+    if (weekNum === 52) return 51;
+  }
+  return Math.min(52, Math.max(1, weekNum));
 }
 
 function getISOWeekNumber(date) {
@@ -209,6 +228,12 @@ function loadState() {
       state.blockedDays = buildDefaultBlockedDays();
       saveBlockedDays();
     }
+
+    const ob = localStorage.getItem(STORAGE_KEYS.OUTBOX);
+    state.outbox = ob ? JSON.parse(ob) : {};
+    if (Object.keys(state.outbox).length > 0) {
+      mergeRemoteEvents(state.events);
+    }
   } catch (e) {
     console.error("Error cargando localStorage:", e);
   }
@@ -228,17 +253,218 @@ function isCellLocked(blocked) {
 
 let pendingSyncWrites = 0;
 let lastWriteTimestamp = 0;
+let syncEpoch = 0;
+
+function saveOutbox() {
+  localStorage.setItem(STORAGE_KEYS.OUTBOX, JSON.stringify(state.outbox || {}));
+}
+
+function eventContent(ev) {
+  const copy = { ...ev };
+  delete copy._saveState;
+  delete copy._saveError;
+  return copy;
+}
+
+// Las lecturas remotas nunca sustituyen una edición pendiente ni resucitan un borrado sin confirmar.
+function mergeRemoteEvents(remoteEvents) {
+  const merged = new Map((remoteEvents || []).map((ev) => [ev.id, { ...ev }]));
+  Object.values(state.outbox || {}).forEach((op) => {
+    if (op.action === "delete") {
+      merged.delete(op.id);
+    } else if (op.event) {
+      merged.set(op.id, {
+        ...op.event,
+        _saveState: op.status === "error" ? "error" : "pending",
+        _saveError: op.error || "",
+      });
+    }
+  });
+  state.events = Array.from(merged.values());
+}
+
+function updateSaveSummary() {
+  const bar = document.getElementById("syncSummaryBar");
+  const txt = document.getElementById("syncSummaryText");
+  if (!bar || !txt) return;
+  const ops = Object.values(state.outbox || {});
+  if (ops.length === 0) {
+    bar.classList.add("hidden");
+    bar.classList.remove("is-error");
+    return;
+  }
+  const errCount = ops.filter((o) => o.status === "error").length;
+  const pendCount = ops.length - errCount;
+  bar.classList.remove("hidden");
+  bar.classList.toggle("is-error", errCount > 0);
+  if (errCount > 0) {
+    const firstErr = ops.find((o) => o.status === "error")?.error || "";
+    txt.textContent = `⚠️ ${errCount} cambio(s) sin sincronizar con Google (${firstErr || "error de conexión"})${pendCount ? ` · ${pendCount} pendiente(s)` : ""}`;
+  } else {
+    txt.textContent = `⏳ ${pendCount} cambio(s) pendientes de sincronizar con el grupo...`;
+  }
+}
+
+function queueEventChange(action, ev) {
+  syncEpoch++;
+  if (!APPS_SCRIPT_URL) {
+    if (action !== "delete") {
+      ev._saveState = "local";
+      ev._saveError = "";
+    }
+    saveEvents();
+    updateSaveSummary();
+    return null;
+  }
+  const op = {
+    action,
+    id: ev.id,
+    event: eventContent(ev),
+    revision: `${Date.now()}-${Math.random()}`,
+    status: "pending",
+    error: "",
+  };
+  state.outbox[ev.id] = op;
+  if (action !== "delete") {
+    ev._saveState = "pending";
+    ev._saveError = "";
+  }
+  saveOutbox();
+  saveEvents();
+  updateSaveSummary();
+  return op;
+}
+
+async function sendQueuedOperation(op) {
+  if (!op || !APPS_SCRIPT_URL) return { ok: true };
+  const payload =
+    op.action === "delete"
+      ? { action: "delete", id: op.id, googleEventId: op.event?.googleEventId || null }
+      : { action: "upsert", event: eventContent(op.event) };
+
+  const res = await postToAppsScript(payload);
+  const currentOp = state.outbox[op.id];
+  // Si el usuario editó o deshizo este mismo ID mientras enviábamos, respetamos la operación más nueva
+  if (!currentOp || currentOp.revision !== op.revision) return res;
+
+  if (res?.ok === true) {
+    delete state.outbox[op.id];
+    const target = state.events.find((x) => x.id === op.id);
+    if (target) {
+      if (res.googleEventId) target.googleEventId = res.googleEventId;
+      delete target._saveState;
+      delete target._saveError;
+    }
+    saveOutbox();
+    saveEvents();
+    updateSaveSummary();
+    renderWeeks();
+    return res;
+  }
+
+  currentOp.status = "error";
+  currentOp.error = res?.error || "No se pudo conectar";
+  const target = state.events.find((x) => x.id === op.id);
+  if (target) {
+    target._saveState = "error";
+    target._saveError = currentOp.error;
+  }
+  saveOutbox();
+  saveEvents();
+  updateSaveSummary();
+  renderWeeks();
+  return res || { ok: false, error: currentOp.error };
+}
+
+async function retryAllChanges() {
+  const ops = Object.values(state.outbox || {});
+  if (ops.length === 0 || !APPS_SCRIPT_URL) return;
+  let okCount = 0;
+  for (const op of ops) {
+    op.status = "pending";
+    op.error = "";
+    const res = await sendQueuedOperation(op);
+    if (res?.ok === true) okCount++;
+  }
+  if (okCount === ops.length) {
+    showToast("Todos los cambios pendientes se han sincronizado.");
+  } else if (okCount > 0) {
+    showToast(`Sincronizados ${okCount} de ${ops.length} cambios.`);
+  } else {
+    showToast("Sigue habiendo cambios sin sincronizar. Revisa tu conexión.");
+  }
+}
+
+function availabilityIssues(ev, excludedIds = []) {
+  const participantIds = [ev.memberId, ...(ev.groupAttendees || [])];
+  const errors = [];
+  const warnings = [];
+  if (!String(ev.title || "").trim()) errors.push("Escribe el título de la actividad.");
+  if (!state.team.some((m) => m.id === ev.memberId)) errors.push("Selecciona la persona responsable.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ev.date || "")) errors.push("Selecciona una fecha válida.");
+  if (!ev.allDay && (!ev.startTime || !ev.endTime || ev.endTime <= ev.startTime)) {
+    errors.push("Indica un horario completo; la hora de fin debe ser posterior al inicio.");
+  }
+  for (const id of new Set(participantIds)) {
+    const blocked = getBlockedInfo(ev.date, id);
+    const name = state.team.find((m) => m.id === id)?.name || id;
+    if (isCellLocked(blocked)) errors.push(`${name}: día bloqueado (${blocked.label}).`);
+    else if (blocked) warnings.push(`${name}: ${blocked.label}.`);
+  }
+  const overlaps = [...state.events, ...state.externalEvents].filter((other) => {
+    if (excludedIds.includes(other.id) || other.date !== ev.date) return false;
+    const others = [other.memberId, ...(other.groupAttendees || [])];
+    if (!participantIds.some((id) => others.includes(id))) return false;
+    return (
+      ev.allDay ||
+      other.allDay ||
+      (ev.startTime < normalizeTimeStr(other.endTime, "23:59") &&
+        ev.endTime > normalizeTimeStr(other.startTime, "00:00"))
+    );
+  });
+  if (overlaps.length) {
+    warnings.push(`Coincide con ${overlaps.length} actividad(es): ${overlaps.map((x) => x.title).join("; ")}.`);
+  }
+  return { errors, warnings };
+}
+
+let availabilityResolver = null;
+function confirmAvailability(ev, excludedIds = []) {
+  const { errors, warnings } = availabilityIssues(ev, excludedIds);
+  if (errors.length) {
+    showToast(errors.join(" "));
+    return Promise.resolve(false);
+  }
+  if (!warnings.length) return Promise.resolve(true);
+  const msgEl = document.getElementById("availabilityMessage");
+  const modalEl = document.getElementById("availabilityModal");
+  if (!msgEl || !modalEl) return Promise.resolve(true);
+  msgEl.textContent = warnings.join(" ") + " ¿Quieres guardar de todas formas?";
+  modalEl.showModal();
+  return new Promise((resolve) => {
+    availabilityResolver = resolve;
+  });
+}
+
+function resolveAvailability(accepted) {
+  const modalEl = document.getElementById("availabilityModal");
+  if (modalEl?.open) modalEl.close();
+  availabilityResolver?.(accepted);
+  availabilityResolver = null;
+}
 
 async function syncFromAppsScript(silent = false) {
   if (!APPS_SCRIPT_URL) return;
   if (pendingSyncWrites > 0 || Date.now() - lastWriteTimestamp < 8000) return;
+  const readEpoch = syncEpoch;
   try {
-    const res = await fetch(APPS_SCRIPT_URL);
+    const res = await fetch(APPS_SCRIPT_URL, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Respuesta ${res.status}`);
     const data = await res.json();
     // Si hubo una escritura local mientras descargábamos, ignoramos esta lectura obsoleta
-    if (pendingSyncWrites > 0 || Date.now() - lastWriteTimestamp < 8000) return;
+    if (readEpoch !== syncEpoch || pendingSyncWrites > 0 || Date.now() - lastWriteTimestamp < 8000) return;
     if (data.ok && Array.isArray(data.events)) {
-      state.events = data.events;
+      mergeRemoteEvents(data.events.map((ev) => ({ ...ev, _saveState: "saved" })));
       saveEvents();
       if (data.blockedDays && Object.keys(data.blockedDays).length > 0) {
         state.blockedDays = data.blockedDays;
@@ -247,8 +473,9 @@ async function syncFromAppsScript(silent = false) {
       if (Array.isArray(data.team) && data.team.length > 0) {
         state.team = data.team;
         saveTeam();
-        renderLegendAndSelects();
+        if (!document.getElementById("eventModal")?.open) renderLegendAndSelects();
       }
+      updateSaveSummary();
       renderWeeks();
       if (!silent) showToast("Calendario del grupo actualizado");
     }
@@ -258,7 +485,7 @@ async function syncFromAppsScript(silent = false) {
 }
 
 async function postToAppsScript(payload) {
-  if (!APPS_SCRIPT_URL) return null;
+  if (!APPS_SCRIPT_URL) return { ok: false, error: "Sin conexión compartida" };
   pendingSyncWrites++;
   lastWriteTimestamp = Date.now();
   try {
@@ -266,16 +493,16 @@ async function postToAppsScript(payload) {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(20000),
     });
     lastWriteTimestamp = Date.now();
-    try {
-      return await res.json();
-    } catch {
-      return { ok: true };
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data?.ok !== true) throw new Error(data?.error || "Guardado no confirmado");
+    return data;
   } catch (err) {
     console.warn("Error enviando cambio a Apps Script:", err);
-    return null;
+    return { ok: false, error: err?.message || "No se pudo conectar" };
   } finally {
     pendingSyncWrites = Math.max(0, pendingSyncWrites - 1);
   }
@@ -345,19 +572,18 @@ async function performUndo() {
   renderWeeks();
 
   if (APPS_SCRIPT_URL) {
-    // Deshacer por ID para no pisar eventos creados por otros compañeros
+    // Deshacer por ID a través de la cola outbox para no pisar eventos de otros compañeros
     for (const oldEv of prevEvents) {
       if (!snapIds.has(oldEv.id)) {
-        await postToAppsScript({ action: "delete", id: oldEv.id, googleEventId: oldEv.googleEventId || null });
+        const op = queueEventChange("delete", oldEv);
+        if (op) await sendQueuedOperation(op);
       }
     }
     for (const ev of state.events) {
       const prev = prevMap.get(ev.id);
-      if (!prev || JSON.stringify(prev) !== JSON.stringify(ev)) {
-        const res = await postToAppsScript({ action: "upsert", event: ev });
-        if (res?.googleEventId) {
-          ev.googleEventId = res.googleEventId;
-        }
+      if (!prev || JSON.stringify(eventContent(prev)) !== JSON.stringify(eventContent(ev))) {
+        const op = queueEventChange("upsert", ev);
+        if (op) await sendQueuedOperation(op);
       }
     }
     saveEvents();
@@ -553,13 +779,19 @@ function getVisibleWeeks() {
 }
 
 function renderWeeks() {
+  const activeEventId = document.activeElement?.dataset?.eventId || null;
   updateViewToggleLabel();
   syncDateSelectorsFromAnchor();
   if (isMobileView() || state.calendarMode === "agenda") {
     renderMobileWeeks();
-    return;
+  } else {
+    renderTableWeeks();
   }
-  renderTableWeeks();
+  if (activeEventId && !document.getElementById("eventModal")?.open) {
+    const container = document.getElementById("weeksContainer");
+    const restored = container?.querySelector(`.event-pill[data-event-id="${CSS.escape(activeEventId)}"]`);
+    if (restored) restored.focus({ preventScroll: true });
+  }
 }
 
 function renderMobileWeeks() {
@@ -723,30 +955,34 @@ function renderTableWeeks() {
 
     const thead = document.createElement("thead");
 
-    // Fila 1: Banner de semana
+    // Fila 1: Banner de semana + Ilustración estacional en la esquina superior izquierda
+    const weekImgIdx = getWeekCornerImageIndex(weekStart, weekNum);
+    const weekImgNum = String(weekImgIdx).padStart(2, "0");
     const trBanner = document.createElement("tr");
     trBanner.innerHTML = `
-      <th class="corner-empty"></th>
+      <th rowspan="3" class="corner-season-cell" title="Semana ${weekNum}">
+        <img class="corner-season-img" src="assets/weeks/w${weekImgNum}.jpg" alt="Semana ${weekNum}" loading="lazy" />
+      </th>
       <th colspan="7" class="week-banner-cell">${monthLabel} · W${weekNum}</th>
     `;
     thead.appendChild(trBanner);
 
     // Fila 2: Letras L M X J V S D
     const trDays = document.createElement("tr");
-    trDays.innerHTML = `<th class="corner-empty"></th>` +
-      weekdayLetters.map((l) => `<th class="weekday-header-cell">${l}</th>`).join("");
+    trDays.innerHTML = weekdayLetters
+      .map((l) => `<th class="weekday-header-cell">${l}</th>`)
+      .join("");
     thead.appendChild(trDays);
 
     // Fila 3: Números del día
     const trNums = document.createElement("tr");
-    trNums.innerHTML = `<th class="corner-empty"></th>` +
-      weekDays
-        .map((d) => {
-          const iso = toIsoDate(d);
-          const cls = iso === todayIso ? "date-number-cell is-today" : "date-number-cell";
-          return `<th class="${cls}" title="${iso}">${d.getDate()}</th>`;
-        })
-        .join("");
+    trNums.innerHTML = weekDays
+      .map((d) => {
+        const iso = toIsoDate(d);
+        const cls = iso === todayIso ? "date-number-cell is-today" : "date-number-cell";
+        return `<th class="${cls}" title="${iso}">${d.getDate()}</th>`;
+      })
+      .join("");
     thead.appendChild(trNums);
     table.appendChild(thead);
 
@@ -912,9 +1148,32 @@ function renderEventPill(ev) {
   const timeStr = ev.allDay ? "" : normalizeTimeStr(ev.startTime);
   const syncBadge = ev.googleEventId ? "G" : "";
   const extBadge = ev.isExternal ? `<span class="ext-badge">${escapeHtml(ev.sourceName || "EXT")}</span>` : "";
+  const saveStateChip =
+    ev._saveState === "error"
+      ? `<span class="event-sync-chip is-error" title="${escapeHtml(ev._saveError || "Error de sincronización")}">⚠</span>`
+      : ev._saveState === "pending"
+        ? `<span class="event-sync-chip" title="Pendiente de sincronizar">⏳</span>`
+        : "";
+
+  if (!ev.isExternal) {
+    pill.dataset.eventId = ev.id;
+    pill.tabIndex = 0;
+    pill.setAttribute("role", "button");
+    pill.setAttribute(
+      "aria-label",
+      `${ev.title}, ${ev.date}${timeStr ? ", " + timeStr : ""}${ev._saveState === "error" ? ", error al sincronizar" : ""}`
+    );
+    pill.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        openEventModal(ev);
+      }
+    };
+  }
 
   pill.innerHTML = `
-    <div>${linkifyHtml(ev.title)}</div>
+    <div>${linkifyHtml(ev.title)}${saveStateChip}</div>
     ${ev.notes ? `<div class="event-notes-preview">${linkifyHtml(ev.notes)}</div>` : ""}
     ${
       timeStr || ev.location || syncBadge || extBadge
@@ -1039,6 +1298,8 @@ function openEventModal(data = {}) {
   document.getElementById("evTitle").value = data.title || "";
   document.getElementById("evMember").value = data.memberId || state.team[0]?.id || "COORD";
   document.getElementById("evChannel").value = data.channelId || "open_market";
+  updateChannelColorDot();
+  closeQuickTimePopover();
   document.getElementById("evDate").value = data.date || toIsoDate(new Date());
   document.getElementById("evStartTime").value = normalizeTimeStr(data.startTime, "09:30");
   document.getElementById("evEndTime").value = normalizeTimeStr(
@@ -1111,10 +1372,6 @@ function clearClipboard() {
 
 async function pasteClipboardTo(targetDate, targetMemberId) {
   if (!state.clipboard) return;
-  if (isCellLocked(getBlockedInfo(targetDate, targetMemberId))) {
-    showToast(`Día bloqueado por vacaciones para ${targetMemberId}`);
-    return;
-  }
   const { mode, eventId } = state.clipboard;
   const orig = state.events.find((x) => x.id === eventId);
   if (!orig) {
@@ -1122,6 +1379,14 @@ async function pasteClipboardTo(targetDate, targetMemberId) {
     return;
   }
   const isCopy = mode === "copy";
+  const candidate = {
+    ...orig,
+    date: targetDate,
+    memberId: targetMemberId,
+  };
+  const ok = await confirmAvailability(candidate, isCopy ? [] : [eventId]);
+  if (!ok) return;
+
   saveUndoSnapshot(`${isCopy ? "Pegar copia" : "Pegar (cortado)"} "${orig.title}"`);
   await moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy);
   if (!isCopy) {
@@ -1168,28 +1433,34 @@ async function executeDropAction(mode) {
   const { eventId, targetDate } = pendingDrop;
   const targetMemberId = document.getElementById("dropTargetMember").value;
 
-  if (isCellLocked(getBlockedInfo(targetDate, targetMemberId))) {
-    showToast(`Día bloqueado por vacaciones para ${targetMemberId} (${targetDate})`);
+  const orig = state.events.find((x) => x.id === eventId);
+  if (!orig) return;
+  if (mode === "move" && orig.date === targetDate && orig.memberId === targetMemberId) {
+    pendingDrop = null;
+    document.getElementById("dropActionModal").close();
     return;
   }
 
+  const toRemove =
+    mode === "replace"
+      ? state.events.filter((x) => x.date === targetDate && x.memberId === targetMemberId && x.id !== eventId)
+      : [];
+  const excludedIds = mode === "copy" ? [] : [eventId, ...toRemove.map((r) => r.id)];
+
+  const ok = await confirmAvailability({ ...orig, date: targetDate, memberId: targetMemberId }, excludedIds);
+  if (!ok) return;
+
   pendingDrop = null;
   document.getElementById("dropActionModal").close();
-
-  const orig = state.events.find((x) => x.id === eventId);
-  if (!orig) return;
-  if (mode === "move" && orig.date === targetDate && orig.memberId === targetMemberId) return;
 
   saveUndoSnapshot(`${mode === "replace" ? "Sustituir" : mode === "copy" ? "Copiar" : "Mover"} "${orig.title}"`);
 
   // Si es sustituir, eliminamos los eventos previos de esa celda destino
   if (mode === "replace") {
-    const toRemove = state.events.filter(
-      (x) => x.date === targetDate && x.memberId === targetMemberId && x.id !== eventId
-    );
     for (const rem of toRemove) {
       if (APPS_SCRIPT_URL) {
-        await postToAppsScript({ action: "delete", id: rem.id });
+        const op = queueEventChange("delete", rem);
+        if (op) await sendQueuedOperation(op);
       } else if (rem.googleEventId && state.accessToken) {
         try {
           const calId = encodeURIComponent(rem.googleCalId || "primary");
@@ -1271,12 +1542,8 @@ async function moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy) {
   saveEvents();
   renderWeeks();
   if (APPS_SCRIPT_URL) {
-    postToAppsScript({ action: "upsert", event: updated }).then((res) => {
-      if (res?.googleEventId) {
-        updated.googleEventId = res.googleEventId;
-        saveEvents();
-      }
-    });
+    const op = queueEventChange("upsert", updated);
+    if (op) sendQueuedOperation(op);
   }
 }
 
@@ -1305,10 +1572,115 @@ function addOneHour(hhmm) {
   return `${String(nextH).padStart(2, "0")}:${String(nextM).padStart(2, "0")}`;
 }
 
+function updateChannelColorDot() {
+  const sel = document.getElementById("evChannel");
+  const dot = document.getElementById("evChannelDot");
+  if (!sel || !dot) return;
+  const ch = CHANNELS.find((c) => c.id === sel.value) || CHANNELS[0];
+  dot.style.background = ch ? ch.bg : "#9ca3af";
+}
+
+function addMinutesToTime(hhmm, deltaMin) {
+  const [h, m] = String(hhmm || "09:30").split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return "09:30";
+  const total = Math.max(0, Math.min(23 * 60 + 59, h * 60 + m + deltaMin));
+  const nh = Math.floor(total / 60);
+  const nm = total % 60;
+  return `${String(nh).padStart(2, "0")}:${String(nm).padStart(2, "0")}`;
+}
+
+function closeQuickTimePopover() {
+  const pop = document.getElementById("quickTimePopover");
+  if (!pop) return;
+  pop.classList.add("hidden");
+  pop.innerHTML = "";
+  pop.dataset.target = "";
+}
+
+function applyQuickTime(inputId, nextVal) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.value = nextVal;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  closeQuickTimePopover();
+}
+
+function openQuickTimePopover(targetInputId, anchorEl) {
+  const pop = document.getElementById("quickTimePopover");
+  const input = document.getElementById(targetInputId);
+  if (!pop || !input || input.disabled) return;
+
+  if (!pop.classList.contains("hidden") && pop.dataset.target === targetInputId) {
+    closeQuickTimePopover();
+    return;
+  }
+
+  const currentVal = normalizeTimeStr(input.value, "09:30");
+  const isEnd = targetInputId === "evEndTime";
+  const startVal = normalizeTimeStr(document.getElementById("evStartTime")?.value, "09:30");
+
+  const presets = [];
+  for (let h = 8; h <= 20; h++) {
+    presets.push(`${String(h).padStart(2, "0")}:00`);
+    if (h < 20) presets.push(`${String(h).padStart(2, "0")}:30`);
+  }
+
+  const durationHtml = isEnd
+    ? `<div class="quick-time-section-title">Duración desde ${escapeHtml(startVal)}</div>
+       <div class="quick-time-durations">
+         <button type="button" class="qt-btn qt-accent" data-qt-val="${addMinutesToTime(startVal, 30)}">+30m</button>
+         <button type="button" class="qt-btn qt-accent" data-qt-val="${addMinutesToTime(startVal, 60)}">+1h</button>
+         <button type="button" class="qt-btn qt-accent" data-qt-val="${addMinutesToTime(startVal, 90)}">+1h30</button>
+         <button type="button" class="qt-btn qt-accent" data-qt-val="${addMinutesToTime(startVal, 120)}">+2h</button>
+       </div>`
+    : "";
+
+  pop.innerHTML = `
+    <div class="quick-time-section-title">Ajuste rápido</div>
+    <div class="quick-time-steppers">
+      <button type="button" class="qt-btn" data-qt-val="${addMinutesToTime(currentVal, -30)}">-30m</button>
+      <button type="button" class="qt-btn" data-qt-val="${addMinutesToTime(currentVal, -15)}">-15m</button>
+      <button type="button" class="qt-btn" data-qt-val="${addMinutesToTime(currentVal, 15)}">+15m</button>
+      <button type="button" class="qt-btn" data-qt-val="${addMinutesToTime(currentVal, 30)}">+30m</button>
+    </div>
+    ${durationHtml}
+    <div class="quick-time-section-title">Horas habituales</div>
+    <div class="quick-time-grid">
+      ${presets
+        .map(
+          (t) =>
+            `<button type="button" class="qt-btn${t === currentVal ? " active" : ""}" data-qt-val="${t}">${t}</button>`
+        )
+        .join("")}
+    </div>
+  `;
+
+  pop.dataset.target = targetInputId;
+  pop.classList.remove("hidden");
+
+  const rect = anchorEl.getBoundingClientRect();
+  const popWidth = 248;
+  const left = Math.max(8, Math.min(window.innerWidth - popWidth - 8, rect.left));
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const top = spaceBelow >= 280 ? rect.bottom + 6 : Math.max(8, rect.top - 290);
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+
+  pop.querySelectorAll("[data-qt-val]").forEach((btn) => {
+    btn.onclick = () => applyQuickTime(targetInputId, btn.dataset.qtVal);
+  });
+}
+
 function toggleTimeInputs() {
   const allDay = document.getElementById("evAllDay").checked;
   document.getElementById("evStartTime").disabled = allDay;
   document.getElementById("evEndTime").disabled = allDay;
+  document.getElementById("evStartTimeField")?.classList.toggle("disabled", allDay);
+  document.getElementById("evEndTimeField")?.classList.toggle("disabled", allDay);
+  document.querySelectorAll(".time-picker-btn").forEach((btn) => {
+    btn.disabled = allDay;
+  });
+  if (allDay) closeQuickTimePopover();
 }
 
 let isSavingEvent = false;
@@ -1328,11 +1700,6 @@ async function handleSaveEvent(e) {
     const startTimeVal = document.getElementById("evStartTime").value;
     const endTimeVal = document.getElementById("evEndTime").value;
     const allDayVal = document.getElementById("evAllDay").checked;
-
-    if (!allDayVal && startTimeVal && endTimeVal && endTimeVal <= startTimeVal) {
-      showToast("La hora de fin debe ser posterior a la hora de inicio");
-      return;
-    }
 
     const id = document.getElementById("evId").value || `ev-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const ev = {
@@ -1359,28 +1726,30 @@ async function handleSaveEvent(e) {
     };
     ev.attendeeEmails = buildAttendeeEmails(ev.memberId, ev.groupAttendees);
 
-    // Guardado optimista inmediato: cierra el modal al instante para evitar dobles clics
+    const allowed = await confirmAvailability(ev, [id]);
+    if (!allowed) return;
+
     const idx = state.events.findIndex((item) => item.id === id);
+    saveUndoSnapshot(idx >= 0 ? `Editar "${ev.title}"` : `Crear "${ev.title}"`);
+
+    // Guardado optimista inmediato: cierra el modal al instante para evitar dobles clics
     if (idx >= 0) state.events[idx] = ev;
     else state.events.push(ev);
 
+    const op = queueEventChange("upsert", ev);
     saveEvents();
     document.getElementById("eventModal").close();
     renderWeeks();
 
     if (APPS_SCRIPT_URL) {
-      showToast("Guardando evento y actualizando Google Calendar...");
-      const res = await postToAppsScript({ action: "upsert", event: ev });
-      if (res?.googleEventId) {
-        ev.googleEventId = res.googleEventId;
-        saveEvents();
-      }
+      showToast("Guardando evento y actualizando Google Calendar...", true);
+      const res = op ? await sendQueuedOperation(op) : await postToAppsScript({ action: "upsert", event: ev });
       if (!res?.ok) {
-        showToast("Guardado localmente (error de red al conectar con Google).");
+        showToast("Guardado en el dispositivo (pendiente de reintentar con Google).", true);
       } else if (res.syncStatus === "error" || res.syncStatus === "no_recipients") {
-        showToast(`Guardado en la web, pero aviso en Calendar: ${res.syncError || res.syncStatus}`);
+        showToast(`Guardado en la web, pero aviso en Calendar: ${res.syncError || res.syncStatus}`, true);
       } else {
-        showToast("Evento guardado para todo el grupo y actualizado en Google Calendar.");
+        showToast("Evento guardado para todo el grupo y actualizado en Google Calendar.", true);
       }
     } else if (ev.syncGoogle && state.accessToken) {
       try {
@@ -1417,13 +1786,14 @@ async function handleDeleteEvent() {
 
   saveUndoSnapshot(`Eliminar "${ev.title}"`);
   state.events = state.events.filter((x) => x.id !== id);
+  const op = APPS_SCRIPT_URL ? queueEventChange("delete", ev) : null;
   saveEvents();
   document.getElementById("eventModal").close();
   renderWeeks();
   showToast("Evento eliminado", true);
 
   if (APPS_SCRIPT_URL) {
-    await postToAppsScript({ action: "delete", id, googleEventId: ev.googleEventId || null });
+    if (op) await sendQueuedOperation(op);
   } else if (ev.googleEventId && state.accessToken) {
     try {
       const calId = encodeURIComponent(ev.googleCalId || "primary");
@@ -1869,15 +2239,45 @@ function mapGoogleEventToLocal(item, calId) {
 
 /* ---------- Exportación .ICS ---------- */
 
-function exportICS() {
+function eventsForExport(scope = "view") {
+  if (scope === "all") return [...state.events];
+  const visibleWeeks = getVisibleWeeks();
+  const visibleDates = new Set();
+  visibleWeeks.forEach((ws) => {
+    for (let i = 0; i < 7; i++) visibleDates.add(toIsoDate(addDays(ws, i)));
+  });
+  const q = state.filters.search.trim().toLowerCase();
+  const chFilter = state.filters.channel;
+  return state.events.filter((ev) => {
+    if (visibleDates.size && !visibleDates.has(ev.date)) return false;
+    if (!isMemberVisible(ev.memberId)) return false;
+    if (chFilter !== "all" && ev.channelId !== chFilter) return false;
+    if (q) {
+      const hay = `${ev.title} ${ev.location || ""} ${ev.notes || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function escapeIcsText(val) {
+  return String(val || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\r?\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function buildICS(events) {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//Calendario Training Xiaomi//ES",
     "CALSCALE:GREGORIAN",
+    "X-WR-TIMEZONE:Europe/Madrid",
   ];
 
-  state.events.forEach((ev) => {
+  events.forEach((ev) => {
     const dtStamp = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
     const dateCompact = ev.date.replace(/-/g, "");
     const member = state.team.find((m) => m.id === ev.memberId);
@@ -1888,21 +2288,21 @@ function exportICS() {
     if (ev.allDay) {
       lines.push(`DTSTART;VALUE=DATE:${dateCompact}`);
     } else {
-      const s = (ev.startTime || "09:00").replace(":", "") + "00";
-      const e = (ev.endTime || "10:00").replace(":", "") + "00";
-      lines.push(`DTSTART:${dateCompact}T${s}`);
-      lines.push(`DTEND:${dateCompact}T${e}`);
+      const s = (normalizeTimeStr(ev.startTime, "09:00") || "09:00").replace(":", "") + "00";
+      const e = (normalizeTimeStr(ev.endTime, "10:00") || "10:00").replace(":", "") + "00";
+      lines.push(`DTSTART;TZID=Europe/Madrid:${dateCompact}T${s}`);
+      lines.push(`DTEND;TZID=Europe/Madrid:${dateCompact}T${e}`);
     }
-    lines.push(`SUMMARY:[${ev.memberId}] ${ev.title}`);
-    if (ev.location) lines.push(`LOCATION:${ev.location}`);
-    if (ev.notes) lines.push(`DESCRIPTION:${ev.notes.replace(/\n/g, "\\n")}`);
-    if (member?.email) lines.push(`ATTENDEE;CN=${member.name}:mailto:${member.email}`);
+    lines.push(`SUMMARY:${escapeIcsText(`[${ev.memberId}] ${ev.title}`)}`);
+    if (ev.location) lines.push(`LOCATION:${escapeIcsText(ev.location)}`);
+    if (ev.notes) lines.push(`DESCRIPTION:${escapeIcsText(ev.notes)}`);
+    if (member?.email) lines.push(`ATTENDEE;CN=${escapeIcsText(member.name)}:mailto:${member.email}`);
 
     // Alarma nativa para móvil y PC
     if (ev.popupMin && ev.popupMin !== "none") {
       lines.push("BEGIN:VALARM");
       lines.push("ACTION:DISPLAY");
-      lines.push(`DESCRIPTION:Recordatorio: ${ev.title}`);
+      lines.push(`DESCRIPTION:${escapeIcsText(`Recordatorio: ${ev.title}`)}`);
       lines.push(`TRIGGER:-PT${ev.popupMin}M`);
       lines.push("END:VALARM");
     }
@@ -1910,12 +2310,24 @@ function exportICS() {
   });
 
   lines.push("END:VCALENDAR");
-  const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+  return lines.join("\r\n");
+}
+
+function exportICS(scope = "view") {
+  const list = eventsForExport(scope);
+  if (list.length === 0) {
+    showToast("No hay eventos que exportar en esta selección.");
+    return;
+  }
+  const icsText = buildICS(list);
+  const blob = new Blob([icsText], { type: "text/calendar;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "calendario-training-2026.ics";
+  a.download = scope === "all" ? "calendario-training-completo.ics" : "calendario-training-vista.ics";
   a.click();
-  showToast("Archivo .ICS descargado (compatible con Google, Outlook y Apple)");
+  showToast(
+    `Exportados ${list.length} evento(s) (${scope === "all" ? "todo el calendario" : "vista actual"}).`
+  );
 }
 
 function handleIcsImport(file) {
@@ -2096,10 +2508,27 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("evContextBadge").classList.add("hidden");
     document.getElementById("evMemberDateRow").classList.remove("hidden");
   };
+  document.getElementById("evChannel").onchange = updateChannelColorDot;
   document.getElementById("evAllDay").onchange = toggleTimeInputs;
   document.getElementById("evStartTime").onchange = (e) => {
     document.getElementById("evEndTime").value = addOneHour(e.target.value);
   };
+  document.querySelectorAll(".time-picker-btn").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const targetId = btn.dataset.timeTarget;
+      const fieldEl = btn.closest(".time-field") || btn;
+      openQuickTimePopover(targetId, fieldEl);
+    };
+  });
+  document.addEventListener("click", (e) => {
+    const pop = document.getElementById("quickTimePopover");
+    if (!pop || pop.classList.contains("hidden")) return;
+    if (pop.contains(e.target) || e.target.closest(".time-picker-btn")) return;
+    closeQuickTimePopover();
+  });
+  document.getElementById("eventModal")?.addEventListener("close", closeQuickTimePopover);
   document.getElementById("evEnableEmailAlert").onchange = (e) => {
     document.getElementById("evReminderEmail").disabled = !e.target.checked;
   };
@@ -2141,7 +2570,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("btnSyncVacationsSheet").onclick = () => syncVacationsAndHolidaysFromSheet(false);
   document.getElementById("btnSyncNow").onclick = () => syncFromGoogleCalendars(false);
-  document.getElementById("btnExportIcs").onclick = exportICS;
+  document.getElementById("btnExportIcs").onclick = () => exportICS("view");
+  document.getElementById("btnExportIcsAll").onclick = () => exportICS("all");
+  document.getElementById("btnRetryAllSync").onclick = retryAllChanges;
+  document.getElementById("btnAvailabilityConfirm").onclick = () => resolveAvailability(true);
+  document.getElementById("btnAvailabilityCancel").onclick = () => resolveAvailability(false);
+  document.getElementById("btnAvailabilityClose").onclick = () => resolveAvailability(false);
+  document.getElementById("availabilityModal")?.addEventListener("cancel", (e) => {
+    e.preventDefault();
+    resolveAvailability(false);
+  });
+  window.addEventListener("online", retryAllChanges);
+  updateSaveSummary();
+  if (Object.keys(state.outbox || {}).length > 0 && APPS_SCRIPT_URL) {
+    retryAllChanges();
+  }
 
   document.querySelectorAll("[data-close]").forEach((btn) => {
     btn.onclick = () => document.getElementById(btn.dataset.close).close();

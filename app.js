@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
   EXT_CALENDARS: "cal_xiaomi_ext_cals_v1",
   GOOGLE_CFG: "cal_xiaomi_google_cfg_v1",
   BLOCKED_DAYS: "cal_xiaomi_blocked_days_v2",
+  MOBILE_LAST_MEMBER: "cal_xiaomi_mobile_last_member_v1",
 };
 
 const DEFAULT_VACATIONS_SHEET_ID = "1K0vGOPwteG6ZjNVT7cDaEwIeb3ONcjmNec3-FGlH10g";
@@ -224,6 +225,17 @@ function loadState() {
 
 function saveBlockedDays() {
   localStorage.setItem(STORAGE_KEYS.BLOCKED_DAYS, JSON.stringify(state.blockedDays));
+}
+
+function getSavedMobileMember() {
+  const saved = localStorage.getItem(STORAGE_KEYS.MOBILE_LAST_MEMBER) || "";
+  return state.team.some((m) => m.id === saved) ? saved : "";
+}
+
+function saveMobileMember(memberId) {
+  if (memberId && state.team.some((m) => m.id === memberId)) {
+    localStorage.setItem(STORAGE_KEYS.MOBILE_LAST_MEMBER, memberId);
+  }
 }
 
 function getBlockedInfo(dateIso, memberId) {
@@ -613,6 +625,7 @@ function renderLegendAndSelects() {
 
   const evMember = document.getElementById("evMember");
   evMember.innerHTML = "";
+  evMember.add(new Option("— Selecciona usuario —", ""));
   state.team.forEach((m) => {
     const label = m.email ? `${m.name} (${m.email})` : m.name;
     evMember.add(new Option(label, m.id));
@@ -839,16 +852,18 @@ function renderMobileWeeks() {
         <button type="button" class="mobile-add-btn">${state.clipboard ? "📋 Pegar" : "+ Añadir"}</button>
       `;
       dayHeader.querySelector(".mobile-add-btn").onclick = () => {
-        const targetMember =
-          state.filters.members.length === 1
-            ? state.filters.members[0]
-            : state.clipboard
-              ? state.events.find((x) => x.id === state.clipboard.eventId)?.memberId || visibleMembers[0]?.id || "COORD"
-              : visibleMembers[0]?.id || "COORD";
         if (state.clipboard) {
-          pasteClipboardTo(iso, targetMember);
+          const clipMember =
+            state.filters.members.length === 1
+              ? state.filters.members[0]
+              : getSavedMobileMember() ||
+                state.events.find((x) => x.id === state.clipboard.eventId)?.memberId ||
+                visibleMembers[0]?.id ||
+                "COORD";
+          pasteClipboardTo(iso, clipMember);
         } else {
-          openEventModal({ date: iso, memberId: targetMember });
+          // En móvil: la primera vez sale en blanco; luego recuerda el último usuario elegido
+          openEventModal({ date: iso, memberId: getSavedMobileMember(), fromMobile: true });
         }
       };
       dayCard.appendChild(dayHeader);
@@ -1015,7 +1030,7 @@ function renderTableWeeks() {
             e.target.classList.contains("event-stack") ||
             e.target.classList.contains("holiday-badge")
           ) {
-            openEventModal({ date: iso, memberId: member.id });
+            openEventModal({ date: iso, memberId: member.id, lockMember: true });
           }
         };
 
@@ -1269,13 +1284,28 @@ function attachTouchDrag(pill, ev) {
 function openEventModal(data = {}) {
   const modal = document.getElementById("eventModal");
   const isEdit = Boolean(data.id);
+  const inMobileLikeView = isMobileView() || state.calendarMode === "agenda";
+  const isFromMobile = Boolean(data.fromMobile) || inMobileLikeView;
+  // En modo tabla, el usuario de la casilla/fila queda bloqueado para evitar introducir datos en otro usuario
+  const lockMember = Boolean(data.lockMember) || (!isFromMobile && Boolean(data.memberId));
 
   document.getElementById("eventModalTitle").textContent = isEdit ? "Editar evento" : "Nuevo evento";
   document.getElementById("evId").value = data.id || "";
   document.getElementById("evGoogleId").value = data.googleEventId || "";
   document.getElementById("evGoogleCalId").value = data.googleCalId || "";
   document.getElementById("evTitle").value = data.title || "";
-  document.getElementById("evMember").value = data.memberId || state.team[0]?.id || "COORD";
+
+  const evMemberSel = document.getElementById("evMember");
+  const resolvedMemberId =
+    data.memberId !== undefined && data.memberId !== null
+      ? data.memberId
+      : isFromMobile
+        ? getSavedMobileMember()
+        : state.team[0]?.id || "COORD";
+  evMemberSel.value = resolvedMemberId;
+  evMemberSel.disabled = lockMember;
+  evMemberSel.title = lockMember ? "Usuario fijado por la fila de la tabla" : "";
+
   document.getElementById("evChannel").value = data.channelId || "open_market";
   updateChannelColorDot();
   closeQuickTimePopover();
@@ -1299,15 +1329,17 @@ function openEventModal(data = {}) {
   document.getElementById("evSyncGoogle").checked = data.syncGoogle !== false;
 
   // Renderizar solo miembros del grupo (nunca invitados externos)
-  renderGroupAttendeeChips(data.memberId || state.team[0]?.id, data.groupAttendees || []);
+  renderGroupAttendeeChips(resolvedMemberId, data.groupAttendees || []);
 
-  // Si viene de hacer clic en una celda concreta (nuevo evento), ocultamos Persona/Fecha y mostramos un resumen
-  const isNewFromCell = !isEdit && Boolean(data.date && data.memberId);
+  // Si viene de hacer clic en una celda concreta con usuario definido (nuevo evento), mostramos resumen compacto
+  const isNewWithContext = !isEdit && Boolean(data.date && resolvedMemberId);
   const badge = document.getElementById("evContextBadge");
   const memberDateRow = document.getElementById("evMemberDateRow");
-  if (isNewFromCell) {
-    const memberObj = state.team.find((m) => m.id === data.memberId);
-    document.getElementById("evContextText").textContent = `👤 ${memberObj?.name || data.memberId} · 📅 ${data.date}`;
+  const changeBtn = document.getElementById("btnChangeContext");
+  if (isNewWithContext) {
+    const memberObj = state.team.find((m) => m.id === resolvedMemberId);
+    document.getElementById("evContextText").textContent = `👤 ${memberObj?.name || resolvedMemberId} · 📅 ${data.date}`;
+    if (changeBtn) changeBtn.textContent = lockMember ? "Cambiar fecha" : "Cambiar";
     badge.classList.remove("hidden");
     memberDateRow.classList.add("hidden");
   } else {
@@ -1320,7 +1352,13 @@ function openEventModal(data = {}) {
   document.getElementById("btnCopyEvent").classList.toggle("hidden", !isEdit);
   document.getElementById("btnCutEvent").classList.toggle("hidden", !isEdit);
   modal.showModal();
-  setTimeout(() => document.getElementById("evTitle").focus(), 30);
+  setTimeout(() => {
+    if (!resolvedMemberId && !lockMember) {
+      evMemberSel.focus();
+    } else {
+      document.getElementById("evTitle").focus();
+    }
+  }, 30);
 }
 
 let hoveredEventId = null;
@@ -1576,12 +1614,14 @@ function closeQuickTimePopover() {
   pop.dataset.target = "";
 }
 
-function applyQuickTime(inputId, nextVal) {
+function applyQuickTime(inputId, nextVal, shouldClose = true) {
   const input = document.getElementById(inputId);
   if (!input) return;
-  input.value = nextVal;
-  input.dispatchEvent(new Event("change", { bubbles: true }));
-  closeQuickTimePopover();
+  if (input.value !== nextVal) {
+    input.value = nextVal;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  if (shouldClose) closeQuickTimePopover();
 }
 
 function openQuickTimePopover(targetInputId, anchorEl) {
@@ -1594,43 +1634,48 @@ function openQuickTimePopover(targetInputId, anchorEl) {
     return;
   }
 
+  const ITEM_H = 34;
   const currentVal = normalizeTimeStr(input.value, "09:30");
+  const [curH, curM] = currentVal.split(":").map(Number);
   const isEnd = targetInputId === "evEndTime";
   const startVal = normalizeTimeStr(document.getElementById("evStartTime")?.value, "09:30");
 
-  const presets = [];
-  for (let h = 8; h <= 20; h++) {
-    presets.push(`${String(h).padStart(2, "0")}:00`);
-    if (h < 20) presets.push(`${String(h).padStart(2, "0")}:30`);
+  const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+  const minutes = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0"));
+  const curHStr = String(Number.isNaN(curH) ? 9 : curH).padStart(2, "0");
+  const curMStr = String(Number.isNaN(curM) ? 30 : curM).padStart(2, "0");
+  if (!minutes.includes(curMStr)) {
+    minutes.push(curMStr);
+    minutes.sort();
   }
 
   const durationHtml = isEnd
-    ? `<div class="quick-time-section-title">Duración desde ${escapeHtml(startVal)}</div>
-       <div class="quick-time-durations">
-         <button type="button" class="qt-btn qt-accent" data-qt-val="${addMinutesToTime(startVal, 30)}">+30m</button>
-         <button type="button" class="qt-btn qt-accent" data-qt-val="${addMinutesToTime(startVal, 60)}">+1h</button>
-         <button type="button" class="qt-btn qt-accent" data-qt-val="${addMinutesToTime(startVal, 90)}">+1h30</button>
-         <button type="button" class="qt-btn qt-accent" data-qt-val="${addMinutesToTime(startVal, 120)}">+2h</button>
+    ? `<div class="wheel-durations">
+         <button type="button" class="wheel-dur-btn" data-dur-val="${addMinutesToTime(startVal, 30)}">+30m</button>
+         <button type="button" class="wheel-dur-btn" data-dur-val="${addMinutesToTime(startVal, 60)}">+1h</button>
+         <button type="button" class="wheel-dur-btn" data-dur-val="${addMinutesToTime(startVal, 120)}">+2h</button>
        </div>`
     : "";
 
   pop.innerHTML = `
-    <div class="quick-time-section-title">Ajuste rápido</div>
-    <div class="quick-time-steppers">
-      <button type="button" class="qt-btn" data-qt-val="${addMinutesToTime(currentVal, -30)}">-30m</button>
-      <button type="button" class="qt-btn" data-qt-val="${addMinutesToTime(currentVal, -15)}">-15m</button>
-      <button type="button" class="qt-btn" data-qt-val="${addMinutesToTime(currentVal, 15)}">+15m</button>
-      <button type="button" class="qt-btn" data-qt-val="${addMinutesToTime(currentVal, 30)}">+30m</button>
-    </div>
     ${durationHtml}
-    <div class="quick-time-section-title">Horas habituales</div>
-    <div class="quick-time-grid">
-      ${presets
-        .map(
-          (t) =>
-            `<button type="button" class="qt-btn${t === currentVal ? " active" : ""}" data-qt-val="${t}">${t}</button>`
-        )
-        .join("")}
+    <div class="wheel-header"><span>Hora</span><span></span><span>Min</span></div>
+    <div class="time-wheel-stage">
+      <div class="time-wheel-highlight" aria-hidden="true"></div>
+      <div class="time-wheel-col" id="wheelHours" aria-label="Horas">
+        <div class="wheel-pad"></div>
+        ${hours.map((h, i) => `<div class="wheel-item${h === curHStr ? " active" : ""}" data-idx="${i}" data-val="${h}">${h}</div>`).join("")}
+        <div class="wheel-pad"></div>
+      </div>
+      <div class="time-wheel-sep" aria-hidden="true">:</div>
+      <div class="time-wheel-col" id="wheelMinutes" aria-label="Minutos">
+        <div class="wheel-pad"></div>
+        ${minutes.map((m, i) => `<div class="wheel-item${m === curMStr ? " active" : ""}" data-idx="${i}" data-val="${m}">${m}</div>`).join("")}
+        <div class="wheel-pad"></div>
+      </div>
+    </div>
+    <div class="wheel-footer">
+      <button type="button" class="wheel-done-btn" id="btnWheelDone">Listo</button>
     </div>
   `;
 
@@ -1638,16 +1683,82 @@ function openQuickTimePopover(targetInputId, anchorEl) {
   pop.classList.remove("hidden");
 
   const rect = anchorEl.getBoundingClientRect();
-  const popWidth = 248;
+  const popWidth = 176;
+  const popHeight = isEnd ? 275 : 244;
   const left = Math.max(8, Math.min(window.innerWidth - popWidth - 8, rect.left));
   const spaceBelow = window.innerHeight - rect.bottom;
-  const top = spaceBelow >= 280 ? rect.bottom + 6 : Math.max(8, rect.top - 290);
+  const top = spaceBelow >= popHeight + 8 ? rect.bottom + 6 : Math.max(8, rect.top - popHeight - 6);
   pop.style.left = `${left}px`;
   pop.style.top = `${top}px`;
 
-  pop.querySelectorAll("[data-qt-val]").forEach((btn) => {
-    btn.onclick = () => applyQuickTime(targetInputId, btn.dataset.qtVal);
+  const hCol = pop.querySelector("#wheelHours");
+  const mCol = pop.querySelector("#wheelMinutes");
+  let selH = curHStr;
+  let selM = curMStr;
+
+  const setActiveVisual = (col, idx) => {
+    col.querySelectorAll(".wheel-item").forEach((el, i) => {
+      el.classList.toggle("active", i === idx);
+    });
+  };
+
+  const syncFromWheels = () => {
+    const hIdx = Math.max(0, Math.min(hours.length - 1, Math.round(hCol.scrollTop / ITEM_H)));
+    const mIdx = Math.max(0, Math.min(minutes.length - 1, Math.round(mCol.scrollTop / ITEM_H)));
+    selH = hours[hIdx];
+    selM = minutes[mIdx];
+    setActiveVisual(hCol, hIdx);
+    setActiveVisual(mCol, mIdx);
+    applyQuickTime(targetInputId, `${selH}:${selM}`, false);
+  };
+
+  // Posicionar inicialmente en la hora/minuto actuales sin animación
+  const initHIdx = Math.max(0, hours.indexOf(curHStr));
+  const initMIdx = Math.max(0, minutes.indexOf(curMStr));
+  hCol.scrollTop = initHIdx * ITEM_H;
+  mCol.scrollTop = initMIdx * ITEM_H;
+
+  const attachWheelBehavior = (col, list) => {
+    let scrollTimer = null;
+    col.addEventListener("scroll", () => {
+      const idx = Math.max(0, Math.min(list.length - 1, Math.round(col.scrollTop / ITEM_H)));
+      setActiveVisual(col, idx);
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(syncFromWheels, 70);
+    });
+    // Paso fino de 1 elemento por cada muesca de la rueda del ratón en escritorio
+    col.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        const dir = Math.sign(e.deltaY);
+        if (!dir) return;
+        const curIdx = Math.max(0, Math.min(list.length - 1, Math.round(col.scrollTop / ITEM_H)));
+        const nextIdx = Math.max(0, Math.min(list.length - 1, curIdx + dir));
+        col.scrollTo({ top: nextIdx * ITEM_H, behavior: "smooth" });
+      },
+      { passive: false }
+    );
+    col.querySelectorAll(".wheel-item").forEach((item) => {
+      item.onclick = () => {
+        const idx = Number(item.dataset.idx);
+        col.scrollTo({ top: idx * ITEM_H, behavior: "smooth" });
+        setTimeout(syncFromWheels, 140);
+      };
+    });
+  };
+
+  attachWheelBehavior(hCol, hours);
+  attachWheelBehavior(mCol, minutes);
+
+  pop.querySelectorAll("[data-dur-val]").forEach((btn) => {
+    btn.onclick = () => applyQuickTime(targetInputId, btn.dataset.durVal, true);
   });
+
+  pop.querySelector("#btnWheelDone").onclick = () => {
+    syncFromWheels();
+    closeQuickTimePopover();
+  };
 }
 
 function toggleTimeInputs() {
@@ -1707,6 +1818,10 @@ async function handleSaveEvent(e) {
 
     const allowed = await confirmAvailability(ev, [id]);
     if (!allowed) return;
+
+    if (isMobileView() || state.calendarMode === "agenda") {
+      saveMobileMember(ev.memberId);
+    }
 
     const idx = state.events.findIndex((item) => item.id === id);
     saveUndoSnapshot(idx >= 0 ? `Editar "${ev.title}"` : `Crear "${ev.title}"`);

@@ -791,6 +791,13 @@ dialog.modal::backdrop {
   box-shadow: 0 0 0 3px rgba(255, 105, 0, 0.14);
 }
 
+.modal-body select:disabled {
+  background-color: #f3f4f6;
+  color: #4b5563;
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
 /* Selector de Canal con indicador de color integrado */
 .channel-select-wrap {
   position: relative;
@@ -892,79 +899,155 @@ dialog.modal::backdrop {
   opacity: 0.5;
 }
 
-/* Popover rápido de hora */
+/* Ruleta moderna y compacta de hora (ratón + táctil) */
 .quick-time-popover {
   position: fixed;
   z-index: 250;
-  width: 248px;
+  width: 176px;
   background: #ffffff;
   border: 1px solid #d1d5db;
-  border-radius: 10px;
-  padding: 10px;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  border-radius: 14px;
+  padding: 10px 10px 8px;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.2);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.quick-time-section-title {
+.wheel-durations {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.wheel-dur-btn {
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 0;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.wheel-dur-btn:hover {
+  background: #ffedd5;
+  border-color: #fb923c;
+}
+
+.wheel-header {
+  display: grid;
+  grid-template-columns: 1fr 14px 1fr;
+  text-align: center;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #6b7280;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
 }
 
-.quick-time-steppers,
-.quick-time-durations {
+.time-wheel-stage {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  grid-template-columns: 1fr 14px 1fr;
+  align-items: center;
+  height: 170px;
+  border-radius: 10px;
+  background: #f8fafc;
+  overflow: hidden;
 }
 
-.quick-time-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
-  max-height: 176px;
+.time-wheel-highlight {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 68px;
+  height: 34px;
+  border-radius: 8px;
+  background: rgba(255, 105, 0, 0.1);
+  border: 1px solid rgba(255, 105, 0, 0.35);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.time-wheel-sep {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 800;
+  color: #ea580c;
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+}
+
+.time-wheel-col {
+  height: 170px;
   overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  position: relative;
+  z-index: 2;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 28%, #000 72%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 28%, #000 72%, transparent 100%);
 }
 
-.qt-btn {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #f9fafb;
-  color: #1f2937;
-  font-size: 11.5px;
+.time-wheel-col::-webkit-scrollbar {
+  display: none;
+}
+
+.wheel-pad {
+  height: 68px;
+  flex-shrink: 0;
+}
+
+.wheel-item {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  scroll-snap-align: center;
+  font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  padding: 5px 4px;
+  color: #64748b;
   cursor: pointer;
-  text-align: center;
-  transition: background-color 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+  user-select: none;
+  transition: color 0.12s ease, transform 0.12s ease;
 }
 
-.qt-btn:hover {
-  background: #fff7ed;
-  border-color: #fb923c;
-  color: #c2410c;
+.wheel-item:hover {
+  color: #111827;
 }
 
-.qt-btn.active {
+.wheel-item.active {
+  color: #ea580c;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.wheel-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.wheel-done-btn {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
   background: #ff6900;
-  border-color: #ea580c;
   color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
 }
 
-.qt-btn.qt-accent {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #1d4ed8;
-}
-
-.qt-btn.qt-accent:hover {
-  background: #dbeafe;
-  border-color: #60a5fa;
+.wheel-done-btn:hover {
+  background: #e55e00;
 }
 
 .form-grid-2 {

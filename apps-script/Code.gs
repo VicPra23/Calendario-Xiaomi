@@ -119,7 +119,7 @@ function doGet() {
       location: String(r[8] || ""),
       notes: String(r[9] || ""),
       popupMin: String(r[10] || "60"),
-      emailMin: String(r[11] || "1440"),
+      emailMin: String(r[11] || "none"),
       groupAttendees: r[12] ? JSON.parse(String(r[12])) : [],
       syncGoogle: r[13] !== false && r[13] !== "false",
       googleEventId: r[15] ? String(r[15]) : null,
@@ -348,7 +348,7 @@ function upsertRow_(sheet, ev) {
     ev.location || "",
     ev.notes || "",
     ev.popupMin || "60",
-    ev.emailMin || "1440",
+    ev.emailMin || "none",
     JSON.stringify(ev.groupAttendees || []),
     ev.syncGoogle !== false,
     new Date().toISOString(),
@@ -392,6 +392,12 @@ function resolveAttendeeEmails_(ev) {
   return recipients;
 }
 
+function isExternalNonGoogleEmail_(email) {
+  const em = String(email || "").trim().toLowerCase();
+  if (!em || em.indexOf("@") < 0) return false;
+  return !(em.endsWith("@salesland.net") || em.endsWith("@gmail.com") || em.endsWith("@googlemail.com"));
+}
+
 function upsertCalendarInvite_(ev, prevGoogleId) {
   const guests = resolveAttendeeEmails_(ev);
   if (!guests.length) {
@@ -402,6 +408,7 @@ function upsertCalendarInvite_(ev, prevGoogleId) {
     };
   }
 
+  const hasExternalGuest = guests.some(isExternalNonGoogleEmail_);
   const cal = getMasterCalendar_();
   const title = `[${ev.memberId}] ${ev.title}`;
   const desc = `${ev.notes || ""}\n\n(Enviado desde Calendario Training)`;
@@ -419,7 +426,9 @@ function upsertCalendarInvite_(ev, prevGoogleId) {
       description: desc,
       location: ev.location || "",
       guests: guests.join(","),
-      sendInvites: false,
+      // Google Workspace (@salesland.net / Gmail) recibe el evento sin correo;
+      // dominios externos como @xiaomi.com (Outlook) necesitan sendInvites: true para que entre en su calendario.
+      sendInvites: hasExternalGuest,
     };
     event = ev.allDay
       ? cal.createAllDayEvent(title, eventDate, opts)
@@ -445,8 +454,178 @@ function upsertCalendarInvite_(ev, prevGoogleId) {
   event.setGuestsCanInviteOthers(false);
   event.removeAllReminders();
   if (ev.popupMin && ev.popupMin !== "none") event.addPopupReminder(Number(ev.popupMin));
-  if (ev.emailMin && ev.emailMin !== "none") event.addEmailReminder(Number(ev.emailMin));
+  if (ev.emailMin && ev.emailMin !== "none") {
+    event.addEmailReminder(Number(ev.emailMin));
+    try {
+      maybeSendEmailReminderNow_(ev, guests);
+    } catch (mailErr) {
+      Logger.log("Aviso enviando recordatorio por correo: " + mailErr);
+    }
+  }
   return { googleEventId: event.getId(), syncStatus: "synced", syncError: "" };
+}
+
+function formatReminderLabel_(min) {
+  const m = Number(min);
+  if (m === 15) return "15 minutos antes";
+  if (m === 30) return "30 minutos antes";
+  if (m === 60) return "1 hora antes";
+  if (m === 1440) return "1 día antes";
+  if (m === 2880) return "2 días antes";
+  return m >= 60 ? `${Math.round(m / 60)} h antes` : `${m} min antes`;
+}
+
+function getSentRemindersMap_() {
+  const raw = PropertiesService.getScriptProperties().getProperty("SENT_EMAIL_REMINDERS");
+  if (!raw) return {};
+  try {
+    const map = JSON.parse(raw);
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const clean = {};
+    Object.keys(map).forEach((k) => {
+      if (Number(map[k]) > cutoff) clean[k] = map[k];
+    });
+    return clean;
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveSentRemindersMap_(map) {
+  PropertiesService.getScriptProperties().setProperty("SENT_EMAIL_REMINDERS", JSON.stringify(map));
+}
+
+function maybeSendEmailReminderNow_(ev, guests) {
+  if (!ev || !ev.emailMin || ev.emailMin === "none") return false;
+  const mins = Number(ev.emailMin);
+  if (!mins || isNaN(mins) || !guests || !guests.length) return false;
+
+  const tz = Session.getScriptTimeZone();
+  const timePart = ev.allDay ? "09:00" : (ev.startTime || "09:30");
+  const eventStart = Utilities.parseDate(`${ev.date} ${timePart}`, tz, "yyyy-MM-dd HH:mm");
+  if (!eventStart) return false;
+
+  const nowMs = Date.now();
+  const startMs = eventStart.getTime();
+  const remindAtMs = startMs - mins * 60000;
+
+  // Solo enviamos si ya estamos dentro de la ventana del recordatorio y el evento aún no ha empezado
+  if (nowMs < remindAtMs || nowMs >= startMs) return false;
+
+  const remKey = `${ev.id}|${ev.date}|${ev.allDay ? "ALLDAY" : (ev.startTime || "09:30")}|${mins}`;
+  const sentMap = getSentRemindersMap_();
+  if (sentMap[remKey]) return false;
+
+  const label = formatReminderLabel_(mins);
+  const horario = ev.allDay ? "Todo el día" : `${ev.startTime || "09:30"} - ${ev.endTime || "10:30"}`;
+  const subject = `🔔 Recordatorio (${label}): [${ev.memberId}] ${ev.title}`;
+  const plainBody = [
+    `Recordatorio de actividad en Calendario Training`,
+    ``,
+    `Actividad: ${ev.title}`,
+    `Responsable: ${ev.memberId}`,
+    `Fecha: ${ev.date}`,
+    `Horario: ${horario}`,
+    ev.location ? `Ubicación: ${ev.location}` : "",
+    ev.notes ? `Notas: ${ev.notes}` : "",
+    ``,
+    `Este es un aviso por correo programado (${label}). No es una invitación de calendario.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const esc = (s) =>
+    String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  const htmlBody = `
+    <div style="font-family:Arial,sans-serif;max-width:520px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+      <div style="background:#ff6900;color:#ffffff;padding:12px 16px;font-weight:700;font-size:15px;">
+        🔔 Recordatorio · Calendario Training
+      </div>
+      <div style="padding:16px;color:#111827;font-size:14px;line-height:1.5;">
+        <p style="margin:0 0 10px;font-size:16px;font-weight:700;">[${esc(ev.memberId)}] ${esc(ev.title)}</p>
+        <p style="margin:4px 0;"><strong>📅 Fecha:</strong> ${esc(ev.date)}</p>
+        <p style="margin:4px 0;"><strong>🕒 Horario:</strong> ${esc(horario)}</p>
+        ${ev.location ? `<p style="margin:4px 0;"><strong>📍 Ubicación:</strong> ${esc(ev.location)}</p>` : ""}
+        ${ev.notes ? `<p style="margin:8px 0 0;padding:8px 10px;background:#f9fafb;border-radius:6px;"><strong>📝 Notas:</strong><br>${esc(ev.notes).replace(/\n/g, "<br>")}</p>` : ""}
+        <p style="margin:14px 0 0;font-size:12px;color:#6b7280;">
+          Aviso programado: ${esc(label)}. (Recordatorio informativo sin invitación .ics).
+        </p>
+      </div>
+    </div>
+  `;
+
+  MailApp.sendEmail({
+    to: guests.join(","),
+    subject: subject,
+    body: plainBody,
+    htmlBody: htmlBody,
+  });
+
+  sentMap[remKey] = nowMs;
+  saveSentRemindersMap_(sentMap);
+  return true;
+}
+
+/**
+ * Revisa periódicamente los eventos con "Alerta por Correo" activada y envía el
+ * correo de recordatorio a todos los destinatarios cuando llega su hora.
+ */
+function processScheduledEmailReminders() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return;
+  try {
+    const sheet = getEventsSheet_();
+    const rows = sheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r[0]) continue;
+      const emailMin = String(r[11] || "none");
+      if (!emailMin || emailMin === "none") continue;
+      const syncGoogle = r[13] !== false && r[13] !== "false";
+      if (!syncGoogle) continue;
+      const ev = {
+        id: String(r[0]),
+        title: String(r[1] || ""),
+        memberId: String(r[2] || "COORD"),
+        channelId: String(r[3] || "open_market"),
+        date: formatDateIso_(r[4]),
+        startTime: formatTimeHhMm_(r[5], "09:30"),
+        endTime: formatTimeHhMm_(r[6], "10:30"),
+        allDay: r[7] === true || r[7] === "true",
+        location: String(r[8] || ""),
+        notes: String(r[9] || ""),
+        emailMin: emailMin,
+        groupAttendees: r[12] ? JSON.parse(String(r[12])) : [],
+      };
+      const guests = resolveAttendeeEmails_(ev);
+      try {
+        maybeSendEmailReminderNow_(ev, guests);
+      } catch (err) {
+        Logger.log("Error enviando recordatorio para " + ev.id + ": " + err);
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Ejecuta esta función UNA VEZ en el editor de Apps Script para activar el envío
+ * automático de recordatorios por correo cada 5 minutos.
+ */
+function activarRecordatoriosPorCorreo() {
+  ScriptApp.getProjectTriggers().forEach((t) => {
+    if (t.getHandlerFunction() === "processScheduledEmailReminders") {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  ScriptApp.newTrigger("processScheduledEmailReminders").timeBased().everyMinutes(5).create();
+  processScheduledEmailReminders();
+  Logger.log("Activador de recordatorios por correo configurado cada 5 minutos.");
 }
 
 function sendCalendarInvite_(ev) {

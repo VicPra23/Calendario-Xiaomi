@@ -1,9 +1,9 @@
-const CACHE_NAME = "cal-training-v56";
+const CACHE_NAME = "cal-training-v57";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=56",
-  "./app.js?v=56",
+  "./styles.css?v=57",
+  "./app.js?v=57",
   "./manifest.json",
   "./icon.svg",
   "./icon-192.png",
@@ -19,22 +19,41 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      )
+      .then(() => self.clients.claim())
   );
 });
 
-// Network-first para que los cambios del grupo y actualizaciones se carguen siempre
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
+// Network-first sin caché HTTP obsoleta; nunca cachear version.json ni Google Apps Script
 self.addEventListener("fetch", (event) => {
-  if (event.request.url.includes("googleapis.com") || event.request.url.includes("accounts.google.com")) {
+  const url = event.request.url;
+  if (
+    event.request.method !== "GET" ||
+    url.includes("version.json") ||
+    url.includes("script.google.com") ||
+    url.includes("script.googleusercontent.com") ||
+    url.includes("googleapis.com") ||
+    url.includes("accounts.google.com")
+  ) {
     return;
   }
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: "no-cache" })
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((c) => c.put(event.request, copy)).catch(() => {});
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(event.request, copy)).catch(() => {});
+        }
         return res;
       })
       .catch(() => caches.match(event.request))

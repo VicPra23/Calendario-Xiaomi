@@ -2,6 +2,9 @@
    Calendario Training — Grupo de Trabajo (Sin servidor · Google Workspace)
    ========================================================================== */
 
+// Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
+const APP_VERSION = "v57";
+
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
 
@@ -2547,6 +2550,68 @@ function linkifyHtml(str) {
   });
 }
 
+/* ---------- Detección y forzado de nuevas actualizaciones ---------- */
+let detectedRemoteVersion = null;
+let updateDismissedVersion = null;
+let swRegistrationRef = null;
+
+function showUpdateBanner(remoteVersion) {
+  const versionTag = remoteVersion || "nueva";
+  if (updateDismissedVersion && updateDismissedVersion === versionTag) return;
+  detectedRemoteVersion = remoteVersion || detectedRemoteVersion;
+  const banner = document.getElementById("updateBanner");
+  const textEl = document.getElementById("updateBannerText");
+  if (!banner || !textEl) return;
+  textEl.textContent = remoteVersion
+    ? `✨ Nueva actualización disponible (${remoteVersion})`
+    : "✨ Nueva actualización disponible";
+  banner.classList.remove("hidden");
+}
+
+async function checkForAppUpdate() {
+  try {
+    if (swRegistrationRef) {
+      swRegistrationRef.update().catch(() => {});
+    }
+    const res = await fetch(`./version.json?ts=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const remoteVer = String(data?.version || "").trim();
+    if (remoteVer && remoteVer !== APP_VERSION) {
+      showUpdateBanner(remoteVer);
+    }
+  } catch {
+    // Sin conexión o entorno sin version.json: ignorar en silencio
+  }
+}
+
+async function forceAppUpdate() {
+  const btn = document.getElementById("btnForceAppUpdate");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Actualizando...";
+  }
+  try {
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const reg of regs) {
+        if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+        await reg.unregister().catch(() => {});
+      }
+    }
+  } catch {
+    // Continuar con recarga forzada aunque falle la limpieza de caché
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.set("v", (detectedRemoteVersion || APP_VERSION).replace(/^v/i, ""));
+  url.searchParams.set("r", String(Date.now()));
+  window.location.replace(url.toString());
+}
+
 /* ---------- Inicialización y Eventos UI ---------- */
 document.addEventListener("DOMContentLoaded", () => {
   loadState();
@@ -2556,8 +2621,37 @@ document.addEventListener("DOMContentLoaded", () => {
   initGoogleAuth();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    navigator.serviceWorker
+      .register(`./sw.js?v=${APP_VERSION.replace(/^v/i, "")}`)
+      .then((reg) => {
+        swRegistrationRef = reg;
+        if (reg.waiting && navigator.serviceWorker.controller) {
+          checkForAppUpdate();
+        }
+        reg.addEventListener("updatefound", () => {
+          const nw = reg.installing;
+          if (!nw) return;
+          nw.addEventListener("statechange", () => {
+            if (nw.state === "installed" && navigator.serviceWorker.controller) {
+              checkForAppUpdate();
+            }
+          });
+        });
+      })
+      .catch(() => {});
   }
+
+  document.getElementById("btnForceAppUpdate").onclick = forceAppUpdate;
+  document.getElementById("btnDismissUpdate").onclick = () => {
+    updateDismissedVersion = detectedRemoteVersion || "nueva";
+    document.getElementById("updateBanner")?.classList.add("hidden");
+  };
+
+  setTimeout(checkForAppUpdate, 3000);
+  setInterval(checkForAppUpdate, 90000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkForAppUpdate();
+  });
 
   if (APPS_SCRIPT_URL) {
     syncFromAppsScript(true);

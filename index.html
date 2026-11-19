@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=56" />
+  <link rel="stylesheet" href="styles.css?v=57" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -326,8 +326,17 @@
     </div>
   </dialog>
 
+  <!-- Aviso flotante de nueva actualización disponible -->
+  <div id="updateBanner" class="update-banner hidden" role="alert" aria-live="polite">
+    <span id="updateBannerText">✨ Nueva actualización disponible</span>
+    <div class="update-banner-actions">
+      <button type="button" id="btnForceAppUpdate" class="update-banner-btn">🔄 Actualizar ahora</button>
+      <button type="button" id="btnDismissUpdate" class="update-banner-close" title="Más tarde" aria-label="Cerrar aviso">✕</button>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=56"></script>
+  <script src="app.js?v=57"></script>
 </body>
 </html>

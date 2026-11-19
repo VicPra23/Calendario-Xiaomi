@@ -1269,6 +1269,75 @@ dialog.modal::backdrop {
   cursor: pointer;
 }
 
+/* Aviso flotante de nueva actualización */
+.update-banner {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 220;
+  background: #111827;
+  color: #ffffff;
+  border: 1.5px solid #ff6900;
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.35);
+  max-width: calc(100vw - 24px);
+}
+
+.update-banner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.update-banner-btn {
+  background: #ff6900;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.12s ease;
+}
+
+.update-banner-btn:hover:not(:disabled) {
+  background: #e55e00;
+}
+
+.update-banner-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.update-banner-close {
+  background: transparent;
+  color: #9ca3af;
+  border: none;
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.update-banner-close:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
 /* Chips de miembros del grupo (solo grupo, sin externos) */
 .group-notify-box {
   display: flex;

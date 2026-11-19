@@ -690,7 +690,7 @@ body {
 }
 
 .blocked-badge {
-  background: var(--ch-otros);
+  background: #a60054;
   color: #ffffff;
   font-weight: 700;
   font-size: 11px;
@@ -705,7 +705,7 @@ body {
 }
 
 .holiday-badge {
-  background: var(--ch-otros);
+  background: #a60054;
   color: #ffffff;
   font-weight: 700;
   font-size: 10.5px;

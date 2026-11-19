@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v65";
+const APP_VERSION = "v66";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";

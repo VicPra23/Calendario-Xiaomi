@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v60";
+const APP_VERSION = "v61";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
@@ -2687,11 +2687,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   document.getElementById("btnForceAppUpdate").onclick = forceAppUpdate;
-  const verBtn = document.getElementById("btnAppVersion");
-  if (verBtn) {
-    verBtn.textContent = `🔄 ${APP_VERSION}`;
-    verBtn.onclick = forceAppUpdate;
-  }
   document.getElementById("btnDismissUpdate").onclick = () => {
     updateDismissedVersion = detectedRemoteVersion || "nueva";
     document.getElementById("updateBanner")?.classList.add("hidden");

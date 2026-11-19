@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=60" />
+  <link rel="stylesheet" href="styles.css?v=61" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -34,12 +34,12 @@
         <button id="btnPrevWeek" class="btn btn-secondary" title="Semana anterior">◀</button>
         <button id="btnToday" class="btn btn-secondary">Hoy</button>
         <button id="btnNextWeek" class="btn btn-secondary" title="Semana siguiente">▶</button>
-        <div class="date-inline-group" title="Año / Mes / Semana">
-          <select id="selectYear" class="select-inline" title="Año"></select>
+        <div class="date-inline-group" title="Semana / Mes / Año">
+          <select id="selectWeek" class="select-inline" title="Semana"></select>
           <span class="date-sep">/</span>
           <select id="selectMonth" class="select-inline" title="Mes"></select>
           <span class="date-sep">/</span>
-          <select id="selectWeek" class="select-inline" title="Semana"></select>
+          <select id="selectYear" class="select-inline" title="Año"></select>
         </div>
         <div class="view-tabs" role="group" aria-label="Modo de vista">
           <button type="button" class="view-tab" data-calendar-mode="week">Semana</button>
@@ -63,7 +63,6 @@
         <button id="btnTeam" class="btn btn-secondary">👥 Equipo</button>
         <button id="btnExportIcs" class="btn btn-secondary" title="Descargar eventos filtrados de la vista actual en .ICS">⬇ .ICS vista</button>
         <button id="btnExportIcsAll" class="btn btn-secondary" title="Descargar todos los eventos del calendario en .ICS">⬇ .ICS todo</button>
-        <button id="btnAppVersion" class="btn btn-secondary btn-version" title="Forzar recarga limpia de la última versión">🔄 v60</button>
       </div>
     </div>
   </header>
@@ -339,6 +338,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=60"></script>
+  <script src="app.js?v=61"></script>
 </body>
 </html>

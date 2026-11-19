@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=57" />
+  <link rel="stylesheet" href="styles.css?v=60" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -63,6 +63,7 @@
         <button id="btnTeam" class="btn btn-secondary">👥 Equipo</button>
         <button id="btnExportIcs" class="btn btn-secondary" title="Descargar eventos filtrados de la vista actual en .ICS">⬇ .ICS vista</button>
         <button id="btnExportIcsAll" class="btn btn-secondary" title="Descargar todos los eventos del calendario en .ICS">⬇ .ICS todo</button>
+        <button id="btnAppVersion" class="btn btn-secondary btn-version" title="Forzar recarga limpia de la última versión">🔄 v60</button>
       </div>
     </div>
   </header>
@@ -150,16 +151,21 @@
         </div>
         <div id="quickTimePopover" class="quick-time-popover hidden" role="dialog" aria-label="Selector rápido de hora"></div>
 
-        <div class="form-row checkbox-row">
+        <div class="form-row event-flags-row">
           <label class="checkbox-label">
             <input type="checkbox" id="evAllDay" />
             Todo el día (ej. Festivo, Día compensatorio, Back Office)
           </label>
+          <input type="checkbox" id="evTentative" class="hidden" />
+          <button type="button" id="btnToggleTentative" class="tentative-toggle-btn" aria-pressed="false" title="Marcar evento como tentativa (pendiente de confirmar)">
+            <span class="tentative-dot" aria-hidden="true"></span>
+            Tentativa
+          </button>
         </div>
 
         <div class="form-row">
           <label>Notas / Comentarios
-            <textarea id="evNotes" rows="2" placeholder="Detalles adicionales, tienda, enlace, material, contacto..."></textarea>
+            <textarea id="evNotes" rows="3" placeholder="Detalles, tienda, enlace meet.google.com/... o teams.microsoft.com/... (Ctrl+Enter para guardar)"></textarea>
           </label>
         </div>
 
@@ -191,12 +197,8 @@
           </div>
           <label class="checkbox-label">
             <input type="checkbox" id="evSyncGoogle" checked />
-            Notificar al correo de la persona del grupo en Google Calendar (alertas en móvil y PC)
+            Notificar al correo de la persona asignada en Google Calendar (alertas en móvil y PC)
           </label>
-          <div class="group-notify-box">
-            <span class="group-notify-label">Notificar también a otros miembros del grupo (nunca a personas externas):</span>
-            <div id="evGroupAttendees" class="group-attendees-chips"></div>
-          </div>
         </fieldset>
       </div>
       <div class="modal-footer">
@@ -337,6 +339,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=57"></script>
+  <script src="app.js?v=60"></script>
 </body>
 </html>

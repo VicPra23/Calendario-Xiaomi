@@ -125,6 +125,7 @@ function doGet() {
       googleEventId: r[15] ? String(r[15]) : null,
       syncStatus: String(r[16] || (r[15] ? "synced" : "pending")),
       syncError: String(r[17] || ""),
+      tentative: r[18] === true || r[18] === "true",
     });
   }
 
@@ -355,6 +356,7 @@ function upsertRow_(sheet, ev) {
     ev.googleEventId || "",
     ev.syncStatus || "",
     ev.syncError || "",
+    Boolean(ev.tentative),
   ];
 
   for (let i = 1; i < rows.length; i++) {
@@ -387,8 +389,8 @@ function resolveAttendeeEmails_(ev) {
   readTeamFromSheet_(getTeamSheet_()).forEach((m) => {
     lookup[m.id] = m.email || "";
   });
+  // Solo notificar a la persona responsable de la tarea (sin añadir otros compañeros como invitados)
   add(lookup[ev.memberId]);
-  (ev.groupAttendees || []).forEach((id) => add(lookup[id]));
   return recipients;
 }
 
@@ -410,7 +412,7 @@ function upsertCalendarInvite_(ev, prevGoogleId) {
 
   const hasExternalGuest = guests.some(isExternalNonGoogleEmail_);
   const cal = getMasterCalendar_();
-  const title = `[${ev.memberId}] ${ev.title}`;
+  const title = `${ev.tentative ? "[TENTATIVA] " : ""}[${ev.memberId}] ${ev.title}`;
   const desc = `${ev.notes || ""}\n\n(Enviado desde Calendario Training)`;
   const tz = Session.getScriptTimeZone();
   const eventDate = Utilities.parseDate(ev.date, tz, "yyyy-MM-dd");

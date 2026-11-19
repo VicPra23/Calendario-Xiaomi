@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v57";
+const APP_VERSION = "v60";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
@@ -451,6 +451,8 @@ function resolveAvailability(accepted) {
   availabilityResolver = null;
 }
 
+let lastSyncFingerprint = "";
+
 async function syncFromAppsScript(silent = false) {
   if (!APPS_SCRIPT_URL) return;
   if (pendingSyncWrites > 0 || Date.now() - lastWriteTimestamp < 8000) return;
@@ -462,6 +464,14 @@ async function syncFromAppsScript(silent = false) {
     // Si hubo una escritura local mientras descargábamos, ignoramos esta lectura obsoleta
     if (readEpoch !== syncEpoch || pendingSyncWrites > 0 || Date.now() - lastWriteTimestamp < 8000) return;
     if (data.ok && Array.isArray(data.events)) {
+      const fingerprint = JSON.stringify({
+        e: data.events,
+        b: data.blockedDays || null,
+        t: data.team || null,
+      });
+      if (silent && fingerprint === lastSyncFingerprint) return;
+      lastSyncFingerprint = fingerprint;
+
       mergeRemoteEvents(data.events.map((ev) => ({ ...ev, _saveState: "saved" })));
       saveEvents();
       if (data.blockedDays && Object.keys(data.blockedDays).length > 0) {
@@ -667,6 +677,26 @@ function renderMemberMultiFilter() {
     renderWeeks();
   };
   menu.appendChild(allLabel);
+
+  const invertBtn = document.createElement("button");
+  invertBtn.type = "button";
+  invertBtn.id = "btnInvertMemberFilter";
+  invertBtn.className = "multi-filter-invert-btn";
+  invertBtn.textContent = "⇄ Invertir selección";
+  invertBtn.onclick = (e) => {
+    e.stopPropagation();
+    if (state.filters.members.length === 0) {
+      showToast("Marca primero una o más personas para invertir el filtro.");
+      return;
+    }
+    const inverted = state.team
+      .map((m) => m.id)
+      .filter((id) => !state.filters.members.includes(id));
+    state.filters.members = inverted.length === state.team.length ? [] : inverted;
+    renderMemberMultiFilter();
+    renderWeeks();
+  };
+  menu.appendChild(invertBtn);
 
   const hr = document.createElement("hr");
   hr.className = "multi-filter-divider";
@@ -1118,7 +1148,11 @@ function renderEventPill(ev) {
   const ch = CHANNELS.find((c) => c.id === ev.channelId) || CHANNELS[0];
   const pill = document.createElement("div");
   const isCut = state.clipboard?.mode === "cut" && state.clipboard.eventId === ev.id;
-  pill.className = "event-pill" + (ev.notes ? " has-notes" : "") + (isCut ? " cut-source" : "");
+  pill.className =
+    "event-pill" +
+    (ev.notes ? " has-notes" : "") +
+    (ev.tentative ? " is-tentative" : "") +
+    (isCut ? " cut-source" : "");
   pill.style.background = ev.customColor || ch.bg;
   pill.style.color = ev.customColor ? "#ffffff" : ch.fg;
 
@@ -1169,7 +1203,12 @@ function renderEventPill(ev) {
     };
   }
 
+  const tentativeBadge = ev.tentative
+    ? `<div><span class="tentative-badge" title="Evento en tentativa"><span class="tentative-dot" aria-hidden="true"></span>Tentativa</span></div>`
+    : "";
+
   pill.innerHTML = `
+    ${tentativeBadge}
     <div>${linkifyHtml(ev.title)}${saveStateChip}</div>
     ${ev.notes ? `<div class="event-notes-preview">${linkifyHtml(ev.notes)}</div>` : ""}
     ${
@@ -1319,6 +1358,7 @@ function openEventModal(data = {}) {
     addOneHour(document.getElementById("evStartTime").value)
   );
   document.getElementById("evAllDay").checked = Boolean(data.allDay);
+  setTentativeState(Boolean(data.tentative));
   document.getElementById("evNotes").value = data.notes || "";
   document.getElementById("evReminderPopup").value = data.popupMin ?? "60";
 
@@ -1569,19 +1609,8 @@ async function moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy) {
 
 function renderGroupAttendeeChips(primaryMemberId, selectedIds = []) {
   const container = document.getElementById("evGroupAttendees");
+  if (!container) return;
   container.innerHTML = "";
-  state.team.forEach((m) => {
-    if (m.id === primaryMemberId) return;
-    const hasEmail = Boolean(m.email && m.email.includes("@"));
-    const label = document.createElement("label");
-    label.className = "group-chip" + (hasEmail ? "" : " disabled");
-    label.title = hasEmail ? m.email : "Añade su correo en 'Equipo' para notificarle";
-    label.innerHTML = `
-      <input type="checkbox" value="${escapeHtml(m.id)}" ${selectedIds.includes(m.id) ? "checked" : ""} ${hasEmail ? "" : "disabled"} />
-      <span>${escapeHtml(m.name)}</span>
-    `;
-    container.appendChild(label);
-  });
 }
 
 function addOneHour(hhmm) {
@@ -1806,6 +1835,7 @@ async function handleSaveEvent(e) {
       startTime: startTimeVal,
       endTime: endTimeVal,
       allDay: allDayVal,
+      tentative: Boolean(document.getElementById("evTentative")?.checked),
       location: "",
       notes: document.getElementById("evNotes").value.trim(),
       popupMin: document.getElementById("evReminderPopup").value,
@@ -2543,10 +2573,25 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+function setTentativeState(isTentative) {
+  const cb = document.getElementById("evTentative");
+  const btn = document.getElementById("btnToggleTentative");
+  if (cb) cb.checked = Boolean(isTentative);
+  if (btn) {
+    btn.classList.toggle("active", Boolean(isTentative));
+    btn.setAttribute("aria-pressed", String(Boolean(isTentative)));
+  }
+}
+
 function linkifyHtml(str) {
   const escaped = escapeHtml(str);
-  return escaped.replace(/(https?:\/\/[^\s<>"']+)/gi, (url) => {
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="event-link">${url}</a>`;
+  const urlRe =
+    /(https?:\/\/[^\s<>"']+|(?:www\.|meet\.google\.com\/|teams\.(?:microsoft|live)\.com\/|zoom\.us\/)[^\s<>"']+)/gi;
+  return escaped.replace(urlRe, (raw) => {
+    const clean = raw.replace(/[.,;!?)\]]+$/, "");
+    const trailing = raw.slice(clean.length);
+    const href = /^https?:\/\//i.test(clean) ? clean : `https://${clean}`;
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="event-link">${clean}</a>${trailing}`;
   });
 }
 
@@ -2642,13 +2687,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   document.getElementById("btnForceAppUpdate").onclick = forceAppUpdate;
+  const verBtn = document.getElementById("btnAppVersion");
+  if (verBtn) {
+    verBtn.textContent = `🔄 ${APP_VERSION}`;
+    verBtn.onclick = forceAppUpdate;
+  }
   document.getElementById("btnDismissUpdate").onclick = () => {
     updateDismissedVersion = detectedRemoteVersion || "nueva";
     document.getElementById("updateBanner")?.classList.add("hidden");
   };
 
-  setTimeout(checkForAppUpdate, 3000);
-  setInterval(checkForAppUpdate, 90000);
+  setTimeout(checkForAppUpdate, 500);
+  setInterval(checkForAppUpdate, 30000);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") checkForAppUpdate();
   });
@@ -2774,6 +2824,16 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   document.getElementById("evChannel").onchange = updateChannelColorDot;
   document.getElementById("evAllDay").onchange = toggleTimeInputs;
+  document.getElementById("btnToggleTentative").onclick = () => {
+    const cb = document.getElementById("evTentative");
+    setTentativeState(!cb?.checked);
+  };
+  document.getElementById("evNotes").addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById("eventForm")?.requestSubmit();
+    }
+  });
   document.getElementById("evStartTime").onchange = (e) => {
     document.getElementById("evEndTime").value = addOneHour(e.target.value);
   };

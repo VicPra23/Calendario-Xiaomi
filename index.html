@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=61" />
+  <link rel="stylesheet" href="styles.css?v=65" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -53,11 +53,14 @@
           <button type="button" id="btnFilterMembers" class="select-filter multi-filter-btn" title="Filtrar por una o varias personas">
             Todo el equipo ▾
           </button>
-          <div id="memberFilterMenu" class="multi-filter-menu hidden"></div>
         </div>
       </div>
 
       <div class="actions">
+        <label id="weekendToggleLabel" class="weekend-toggle-label" title="Mostrar u ocultar sábado y domingo">
+          <input type="checkbox" id="chkShowWeekends" checked />
+          <span>Fin de semana</span>
+        </label>
         <button id="btnToggleView" class="btn btn-secondary" title="Cambiar entre vista tabla y vista móvil">📱 Vista</button>
         <button id="btnUndo" class="btn btn-secondary hidden" title="Deshacer último cambio">↶ Deshacer</button>
         <button id="btnTeam" class="btn btn-secondary">👥 Equipo</button>
@@ -67,7 +70,7 @@
     </div>
   </header>
 
-  <!-- Leyenda de Canales (idéntica al estilo del Google Sheet original) -->
+  <!-- Leyenda de canales y filtro por cuenta -->
   <section class="legend-wrapper" aria-label="Leyenda de canales">
     <div class="legend-grid">
       <div class="legend-title">Canales</div>
@@ -327,6 +330,9 @@
     </div>
   </dialog>
 
+  <!-- Menú flotante de filtro de equipo (compartido entre esquina de tabla y barra móvil) -->
+  <div id="memberFilterMenu" class="multi-filter-menu hidden"></div>
+
   <!-- Aviso flotante de nueva actualización disponible -->
   <div id="updateBanner" class="update-banner hidden" role="alert" aria-live="polite">
     <span id="updateBannerText">✨ Nueva actualización disponible</span>
@@ -338,6 +344,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=61"></script>
+  <script src="app.js?v=65"></script>
 </body>
 </html>

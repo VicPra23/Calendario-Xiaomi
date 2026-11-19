@@ -1,3 +1,31 @@
+# Calendario Training — v62
+
+Actualización visual sobre Calendario Xiaomi(3).zip (v61). Conserva las vistas, filas por trainer y funciones existentes.
+
+## Cambios
+
+- Día de la semana y número del mes en una sola fila; sábado y domingo como S y D.
+- Cabeceras por trimestre: azul (enero–marzo), verde (abril–junio), arena (julio–septiembre) y terracota (octubre–diciembre). No se añaden etiquetas de trimestre. En semanas compartidas se muestran ambos meses con sus colores.
+- Open Market se divide en MediaMarkt (rojo) y El Corte Inglés · ECI (verde). Los tonos son adaptaciones para la interfaz.
+- Interno usa azul pizarra, Materiales verde petróleo y Otros malva. Nueva leyenda con muestras de color y filtros, también adaptada a móvil.
+- Las actividades antiguas con canal open_market conservan su ID y clasificación. Aparecen como «Open Market · por clasificar» hasta que una persona elija la cadena correcta al editarlas. Las actividades nuevas requieren seleccionar canal.
+
+## Entrega y validación
+
+No se han activado ni modificado servicios reales. La URL configurada y apps-script/Code.gs se conservan del original. Esta entrega no requiere cambiar el backend por los cambios visuales.
+
+Se verificaron las vistas de escritorio y móvil en una copia aislada sin conexión a Google, el selector de canales y cinco pruebas de regresión de fechas, trimestres y compatibilidad de datos antiguos. No se ha probado la sincronización real con Google en esta revisión.
+
+Pruebas locales: `node --test tests/presentation.test.cjs`.
+
+La caché y las referencias de recursos pasan a v62. Publicar los archivos requiere una acción posterior del usuario.
+
+---
+
+## Documentación original de v61
+
+Se conserva debajo como referencia histórica; las cabeceras y los colores descritos originalmente han sido actualizados según lo indicado arriba.
+
 # Calendario Training 2026 — Grupo de Trabajo (Sin Servidor · Google Workspace)
 
 Aplicación web estática (**presupuesto 0 €**, sin servidor backend) que mantiene exactamente el estilo visual de tu hoja **Calendario Training 2026** (bloques semanales `MES · WXX`, columnas `L M X J V S D`, filas por rol `COORD`, `David`, `TL1`, `TM1`, `TB1`, `TS1`, `TN1` y leyenda de **Canales** con los mismos colores), añadiendo:

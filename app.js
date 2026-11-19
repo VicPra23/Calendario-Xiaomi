@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v61";
+const APP_VERSION = "v65";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
@@ -16,6 +16,7 @@ const STORAGE_KEYS = {
   GOOGLE_CFG: "cal_xiaomi_google_cfg_v1",
   BLOCKED_DAYS: "cal_xiaomi_blocked_days_v2",
   MOBILE_LAST_MEMBER: "cal_xiaomi_mobile_last_member_v1",
+  HIDE_WEEKENDS: "cal_xiaomi_hide_weekends_v1",
 };
 
 const DEFAULT_VACATIONS_SHEET_ID = "1K0vGOPwteG6ZjNVT7cDaEwIeb3ONcjmNec3-FGlH10g";
@@ -70,16 +71,63 @@ function buildDefaultBlockedDays() {
 }
 
 const CHANNELS = [
-  { id: "open_market", label: "Open Market", bg: "#cccccc", fg: "#111111" },
-  { id: "interno", label: "INTERNO (PC, GPV...)", bg: "#ffff00", fg: "#111111" },
+  { id: "media_markt", label: "MediaMarkt", bg: "#df0000", fg: "#ffffff" },
+  { id: "eci", label: "El Corte Inglés · ECI", bg: "#00843d", fg: "#ffffff" },
+  { id: "interno", label: "Interno (PC, GPV…)", bg: "#536d86", fg: "#ffffff" },
   { id: "xiaomi_stores", label: "Xiaomi Stores", bg: "#ff6d01", fg: "#111111" },
-  { id: "materiales", label: "Materiales", bg: "#34a853", fg: "#111111" },
-  { id: "otros", label: "Otros", bg: "#a60054", fg: "#ffffff" },
+  { id: "materiales", label: "Materiales", bg: "#287d83", fg: "#ffffff" },
+  { id: "otros", label: "Otros", bg: "#70617d", fg: "#ffffff" },
   { id: "orange", label: "ORANGE (OSP)", bg: "#ff9900", fg: "#111111" },
-  { id: "vodafone", label: "VODAFONE (VDF)", bg: "#e53935", fg: "#ffffff" },
+  { id: "vodafone", label: "VODAFONE (VDF)", bg: "#ff5a5f", fg: "#ffffff" },
   { id: "masmovil", label: "MÁS MOVIL & YOIGO", bg: "#e01e84", fg: "#ffffff" },
   { id: "telefonica", label: "TELEFÓNICA (TME)", bg: "#4a86e8", fg: "#ffffff" },
 ];
+
+// Compatibilidad: los eventos antiguos de open_market se muestran como "Otros" hasta que se editen o eliminen.
+function getChannel(id) {
+  return (
+    CHANNELS.find((channel) => channel.id === id) ||
+    CHANNELS.find((channel) => channel.id === "otros") ||
+    CHANNELS[0]
+  );
+}
+
+function getVisibleChannels() {
+  return CHANNELS;
+}
+
+const QUARTER_THEMES = [
+  { bg: "#dce8f3", fg: "#244a6b", accent: "#527da1" },
+  { bg: "#dceee6", fg: "#255a46", accent: "#4f8b70" },
+  { bg: "#f4e6c9", fg: "#70521f", accent: "#b28a40" },
+  { bg: "#f0ded7", fg: "#784b3a", accent: "#ad7661" },
+];
+
+function getQuarterTheme(date) {
+  return QUARTER_THEMES[Math.floor(date.getMonth() / 3)];
+}
+
+function applyQuarterTheme(element, date) {
+  const theme = getQuarterTheme(date);
+  element.style.setProperty("--period-bg", theme.bg);
+  element.style.setProperty("--period-fg", theme.fg);
+  element.style.setProperty("--period-accent", theme.accent);
+}
+
+function weekBannerHtml(weekDays, weekNum) {
+  // Las semanas entre dos meses muestran ambos; cada mes conserva su color.
+  const months = weekDays.filter((date, i) => i === 0 || date.getMonth() !== weekDays[i - 1].getMonth());
+  const monthNames = months.map((date) => {
+    const theme = getQuarterTheme(date);
+    return `<span class="week-month-name" style="background:${theme.bg};color:${theme.fg}">${getMonthNameEs(date)}</span>`;
+  }).join('<span class="month-divider" aria-hidden="true">/</span>');
+  return `<div class="week-banner-content"><span class="week-months">${monthNames}</span><span class="week-number">W${weekNum}</span></div>`;
+}
+
+function dayHeaderHtml(date) {
+  const dayNames = ["D", "Lun", "Mar", "Mié", "Jue", "Vie", "S"];
+  return `<span class="day-name">${dayNames[date.getDay()]}</span><span class="day-number">${date.getDate()}</span>`;
+}
 
 const DEFAULT_TEAM = [
   { id: "COORD", name: "COORD", email: "victorprado@salesland.net", calendarId: "victorprado@salesland.net" },
@@ -122,6 +170,7 @@ let state = {
   clipboard: null, // { mode: "copy" | "cut", eventId: string }
   viewMode: "auto", // "auto" | "table" | "mobile"
   calendarMode: "month", // "week" | "month" | "agenda"
+  hideWeekends: false,
   anchorDate: new Date(),
   filters: { search: "", members: [], channel: "all" }, // members: [] = Todo el equipo
 };
@@ -221,6 +270,8 @@ function loadState() {
     if (Object.keys(state.outbox).length > 0) {
       mergeRemoteEvents(state.events);
     }
+
+    state.hideWeekends = localStorage.getItem(STORAGE_KEYS.HIDE_WEEKENDS) === "1";
   } catch (e) {
     console.error("Error cargando localStorage:", e);
   }
@@ -619,12 +670,20 @@ function renderLegendAndSelects() {
   legendEl.innerHTML = "";
   evChannel.innerHTML = "";
 
-  CHANNELS.forEach((ch) => {
-    const chip = document.createElement("div");
+  evChannel.add(new Option("— Selecciona canal —", ""));
+  getVisibleChannels().forEach((ch) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.setAttribute("aria-pressed", String(state.filters.channel === ch.id));
     chip.className = "legend-chip" + (state.filters.channel === ch.id ? " active-filter" : "");
-    chip.style.background = ch.bg;
-    chip.style.color = ch.fg;
-    chip.textContent = ch.label;
+    chip.style.setProperty("--channel-bg", ch.bg);
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    swatch.style.background = ch.bg;
+    swatch.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = ch.label;
+    chip.append(swatch, label);
     chip.title = "Clic para filtrar por este canal";
     chip.onclick = () => {
       state.filters.channel = state.filters.channel === ch.id ? "all" : ch.id;
@@ -807,10 +866,45 @@ function getVisibleWeeks() {
   return getMonthWeeks(state.anchorDate.getFullYear(), state.anchorDate.getMonth());
 }
 
+let activeMemberFilterAnchor = null;
+
+function toggleMemberFilterMenu(anchorEl) {
+  const menu = document.getElementById("memberFilterMenu");
+  if (!menu || !anchorEl) return;
+  const isAlreadyOpen = !menu.classList.contains("hidden") && activeMemberFilterAnchor === anchorEl;
+  if (isAlreadyOpen) {
+    menu.classList.add("hidden");
+    activeMemberFilterAnchor = null;
+    return;
+  }
+  activeMemberFilterAnchor = anchorEl;
+  menu.classList.remove("hidden");
+  const rect = anchorEl.getBoundingClientRect();
+  const menuW = Math.max(196, menu.offsetWidth || 196);
+  const left = Math.max(8, Math.min(window.innerWidth - menuW - 8, rect.left));
+  const top = Math.min(window.innerHeight - 160, rect.bottom + 4);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function updateWeekendsToggleUI() {
+  const chk = document.getElementById("chkShowWeekends");
+  if (chk) chk.checked = !state.hideWeekends;
+  // En modo tabla, Fin de semana y el Filtro de equipo viven en la esquina superior izquierda de la tabla;
+  // en modo móvil / agenda aparecen en la barra superior. El botón 👥 Equipo permanece siempre en la barra superior.
+  const showInTopbar = isMobileView() || state.calendarMode === "agenda";
+  document.getElementById("weekendToggleLabel")?.classList.toggle("hidden", !showInTopbar);
+  document.getElementById("memberMultiFilter")?.classList.toggle("hidden", !showInTopbar);
+  document.getElementById("btnTeam")?.classList.remove("hidden");
+}
+
 function renderWeeks() {
   const activeEventId = document.activeElement?.dataset?.eventId || null;
   updateViewToggleLabel();
+  updateWeekendsToggleUI();
   syncDateSelectorsFromAnchor();
+  const dateControls = document.querySelector(".date-inline-group");
+  if (dateControls) applyQuarterTheme(dateControls, state.anchorDate);
   if (isMobileView() || state.calendarMode === "agenda") {
     renderMobileWeeks();
   } else {
@@ -843,13 +937,15 @@ function renderMobileWeeks() {
 
     const banner = document.createElement("div");
     banner.className = "mobile-week-banner";
-    banner.textContent = `${monthLabel} · W${weekNum}`;
+    applyQuarterTheme(banner, weekDays[3]);
+    banner.innerHTML = weekBannerHtml(weekDays, weekNum);
     card.appendChild(banner);
 
     const daysList = document.createElement("div");
     daysList.className = "mobile-days-list";
 
-    weekDays.forEach((d, idx) => {
+    const visibleDays = state.hideWeekends ? weekDays.slice(0, 5) : weekDays;
+    visibleDays.forEach((d, idx) => {
       const iso = toIsoDate(d);
       const isToday = iso === todayIso;
       const isWeekend = idx >= 5;
@@ -880,8 +976,9 @@ function renderMobileWeeks() {
         "mobile-day-header" +
         (isToday ? " is-today" : "") +
         (isWeekend ? " is-weekend" : "");
+      applyQuarterTheme(dayHeader, d);
       dayHeader.innerHTML = `
-        <span>${dayNames[idx]} ${d.getDate()}</span>
+        <span class="day-heading" aria-label="${d.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}">${dayHeaderHtml(d)}</span>
         <button type="button" class="mobile-add-btn">${state.clipboard ? "📋 Pegar" : "+ Añadir"}</button>
       `;
       dayHeader.querySelector(".mobile-add-btn").onclick = () => {
@@ -965,12 +1062,14 @@ function renderTableWeeks() {
 
     const block = document.createElement("div");
     block.className = "week-block";
+    applyQuarterTheme(block, weekDays[3]);
     block.dataset.weekMonday = toIsoDate(weekStart);
 
+    const visibleDays = state.hideWeekends ? weekDays.slice(0, 5) : weekDays;
     const table = document.createElement("table");
-    table.className = "week-table";
+    table.className = "week-table" + (state.hideWeekends ? " hide-weekends" : "");
 
-    // Colgroup para proporciones fieles al Excel (L-V anchos, S-D estrechos)
+    // Colgroup para proporciones fieles al Excel (L-V anchos, S-D estrechos u ocultos)
     table.innerHTML = `
       <colgroup>
         <col class="col-role" />
@@ -979,38 +1078,57 @@ function renderTableWeeks() {
         <col class="col-weekday" />
         <col class="col-weekday" />
         <col class="col-weekday" />
-        <col class="col-weekend" />
-        <col class="col-weekend" />
+        ${state.hideWeekends ? "" : '<col class="col-weekend" /><col class="col-weekend" />'}
       </colgroup>
     `;
 
     const thead = document.createElement("thead");
 
-    // Fila 1: Banner de semana
+    // Fila 1: Banner de semana + casilla Fin de semana (S / D) en la esquina
     const trBanner = document.createElement("tr");
     trBanner.innerHTML = `
-      <th class="corner-empty"></th>
-      <th colspan="7" class="week-banner-cell">${monthLabel} · W${weekNum}</th>
+      <th class="corner-empty corner-control-cell">
+        <label class="corner-weekend-toggle" title="Mostrar u ocultar sábado y domingo">
+          <input type="checkbox" class="chk-corner-weekends" ${!state.hideWeekends ? "checked" : ""} />
+          <span>S / D</span>
+        </label>
+      </th>
+      <th colspan="${visibleDays.length}" class="week-banner-cell">${weekBannerHtml(weekDays, weekNum)}</th>
     `;
+    trBanner.querySelector(".chk-corner-weekends").onchange = (e) => {
+      state.hideWeekends = !e.target.checked;
+      localStorage.setItem(STORAGE_KEYS.HIDE_WEEKENDS, state.hideWeekends ? "1" : "0");
+      renderWeeks();
+    };
     thead.appendChild(trBanner);
 
-    // Fila 2: Letras L M X J V S D
+    // Una única fila combina nombre del día y fecha, incluidos S y D, con el filtro de equipo en la esquina.
+    const selMembers = state.filters.members;
+    const cornerFilterText =
+      selMembers.length === 0
+        ? "Equipo ▾"
+        : selMembers.length === 1
+          ? `${escapeHtml(selMembers[0])} ▾`
+          : `${selMembers.length} pers. ▾`;
     const trDays = document.createElement("tr");
-    trDays.innerHTML = `<th class="corner-empty"></th>` +
-      weekdayLetters.map((l) => `<th class="weekday-header-cell">${l}</th>`).join("");
+    trDays.innerHTML = `<th class="corner-empty corner-control-cell" scope="col"><button type="button" class="corner-team-btn corner-filter-btn${selMembers.length ? " is-filtered" : ""}" title="Filtrar por personas del equipo">${cornerFilterText}</button></th>`;
+    const cornerFilterBtn = trDays.querySelector(".corner-filter-btn");
+    cornerFilterBtn.onclick = (e) => {
+      e.stopPropagation();
+      toggleMemberFilterMenu(cornerFilterBtn);
+    };
+    visibleDays.forEach((date) => {
+      const th = document.createElement("th");
+      th.scope = "col";
+      th.className = "date-number-cell combined-day-cell" + (toIsoDate(date) === todayIso ? " is-today" : "");
+      if (date.getDay() === 0 || date.getDay() === 6) th.classList.add("is-weekend");
+      th.setAttribute("aria-label", date.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" }));
+      th.title = toIsoDate(date);
+      applyQuarterTheme(th, date);
+      th.innerHTML = `<span class="day-heading">${dayHeaderHtml(date)}</span>`;
+      trDays.appendChild(th);
+    });
     thead.appendChild(trDays);
-
-    // Fila 3: Números del día
-    const trNums = document.createElement("tr");
-    trNums.innerHTML = `<th class="corner-empty"></th>` +
-      weekDays
-        .map((d) => {
-          const iso = toIsoDate(d);
-          const cls = iso === todayIso ? "date-number-cell is-today" : "date-number-cell";
-          return `<th class="${cls}" title="${iso}">${d.getDate()}</th>`;
-        })
-        .join("");
-    thead.appendChild(trNums);
     table.appendChild(thead);
 
     // Cuerpo: Filas por cada miembro del equipo
@@ -1029,8 +1147,8 @@ function renderTableWeeks() {
       `;
       tr.appendChild(tdRole);
 
-      // Celdas L..D
-      weekDays.forEach((d, idx) => {
+      // Celdas L..V (o L..D)
+      visibleDays.forEach((d, idx) => {
         const iso = toIsoDate(d);
         const blocked = getBlockedInfo(iso, member.id);
         const locked = isCellLocked(blocked);
@@ -1129,7 +1247,7 @@ function getFilteredEventsForCell(dateIso, memberId) {
     .filter((ev) => {
       if (ev.date !== dateIso) return false;
       if (ev.memberId !== memberId) return false;
-      if (chFilter !== "all" && ev.channelId !== chFilter) return false;
+      if (chFilter !== "all" && getChannel(ev.channelId).id !== chFilter) return false;
       if (q) {
         const hay = `${ev.title} ${ev.location || ""} ${ev.notes || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -1145,7 +1263,7 @@ function getFilteredEventsForCell(dateIso, memberId) {
 }
 
 function renderEventPill(ev) {
-  const ch = CHANNELS.find((c) => c.id === ev.channelId) || CHANNELS[0];
+  const ch = getChannel(ev.channelId);
   const pill = document.createElement("div");
   const isCut = state.clipboard?.mode === "cut" && state.clipboard.eventId === ev.id;
   pill.className =
@@ -1158,7 +1276,7 @@ function renderEventPill(ev) {
 
   if (!ev.isExternal) {
     pill.draggable = true;
-    pill.title = "Clic para editar · Ctrl+C copiar · Ctrl+X cortar · Arrastrar para mover/copiar";
+    pill.title = `${ch.label} · Clic para editar · Ctrl+C copiar · Ctrl+X cortar · Arrastrar para mover/copiar`;
     pill.onmouseenter = () => {
       hoveredEventId = ev.id;
     };
@@ -1192,7 +1310,7 @@ function renderEventPill(ev) {
     pill.setAttribute("role", "button");
     pill.setAttribute(
       "aria-label",
-      `${ev.title}, ${ev.date}${timeStr ? ", " + timeStr : ""}${ev._saveState === "error" ? ", error al sincronizar" : ""}`
+      `${ev.title}, ${ch.label}, ${ev.date}${timeStr ? ", " + timeStr : ""}${ev._saveState === "error" ? ", error al sincronizar" : ""}`
     );
     pill.onkeydown = (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -1348,7 +1466,8 @@ function openEventModal(data = {}) {
   evMemberSel.disabled = lockMember;
   evMemberSel.title = lockMember ? "Usuario fijado por la fila de la tabla" : "";
 
-  document.getElementById("evChannel").value = data.channelId || "open_market";
+  const channelSelect = document.getElementById("evChannel");
+  channelSelect.value = data.channelId ? getChannel(data.channelId).id : "";
   updateChannelColorDot();
   closeQuickTimePopover();
   document.getElementById("evDate").value = data.date || toIsoDate(new Date());
@@ -1625,8 +1744,8 @@ function updateChannelColorDot() {
   const sel = document.getElementById("evChannel");
   const dot = document.getElementById("evChannelDot");
   if (!sel || !dot) return;
-  const ch = CHANNELS.find((c) => c.id === sel.value) || CHANNELS[0];
-  dot.style.background = ch ? ch.bg : "#9ca3af";
+  const ch = sel.value ? getChannel(sel.value) : null;
+  dot.style.background = ch ? ch.bg : "#cbd5e1";
 }
 
 function addMinutesToTime(hhmm, deltaMin) {
@@ -2080,7 +2199,7 @@ function initGoogleAuth() {
 
 function buildGoogleCalendarTemplateUrl(ev) {
   const member = state.team.find((m) => m.id === ev.memberId);
-  const ch = CHANNELS.find((c) => c.id === ev.channelId);
+  const ch = getChannel(ev.channelId);
   const emails = [];
   if (member?.email) emails.push(member.email);
   (ev.groupAttendees || []).forEach((mId) => {
@@ -2153,7 +2272,7 @@ async function gFetch(url, options = {}) {
 async function upsertGoogleCalendarEvent(ev) {
   const calId = encodeURIComponent(state.googleCfg.primaryCalendarId || "primary");
   const member = state.team.find((m) => m.id === ev.memberId);
-  const ch = CHANNELS.find((c) => c.id === ev.channelId);
+  const ch = getChannel(ev.channelId);
 
   // Solo se permite invitar a miembros del grupo (nunca a personas externas)
   const allowedTeamEmails = new Set(
@@ -2427,7 +2546,7 @@ function mapGoogleEventToLocal(item, calId) {
     googleCalId: calId,
     title: roleMatch ? roleMatch[2] : rawSummary,
     memberId: props.memberId || inferredMember || state.team[0]?.id || "COORD",
-    channelId: props.channelId || "open_market",
+    channelId: props.channelId || "otros",
     date: startStr.slice(0, 10),
     allDay: Boolean(item.start?.date),
     startTime: item.start?.dateTime ? item.start.dateTime.slice(11, 16) : "09:00",
@@ -2454,7 +2573,7 @@ function eventsForExport(scope = "view") {
   return state.events.filter((ev) => {
     if (visibleDates.size && !visibleDates.has(ev.date)) return false;
     if (!isMemberVisible(ev.memberId)) return false;
-    if (chFilter !== "all" && ev.channelId !== chFilter) return false;
+    if (chFilter !== "all" && getChannel(ev.channelId).id !== chFilter) return false;
     if (q) {
       const hay = `${ev.title} ${ev.location || ""} ${ev.notes || ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
@@ -2761,11 +2880,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const memberFilterMenu = document.getElementById("memberFilterMenu");
   btnFilterMembers.onclick = (e) => {
     e.stopPropagation();
-    memberFilterMenu.classList.toggle("hidden");
+    toggleMemberFilterMenu(btnFilterMembers);
   };
   document.addEventListener("click", (e) => {
-    if (!e.target.closest("#memberMultiFilter")) {
+    if (
+      !e.target.closest("#memberFilterMenu") &&
+      !e.target.closest("#btnFilterMembers") &&
+      !e.target.closest(".corner-filter-btn")
+    ) {
       memberFilterMenu.classList.add("hidden");
+      activeMemberFilterAnchor = null;
     }
   });
 
@@ -2802,6 +2926,12 @@ document.addEventListener("DOMContentLoaded", () => {
       clearClipboard();
     }
   });
+  document.getElementById("chkShowWeekends").onchange = (e) => {
+    state.hideWeekends = !e.target.checked;
+    localStorage.setItem(STORAGE_KEYS.HIDE_WEEKENDS, state.hideWeekends ? "1" : "0");
+    updateWeekendsToggleUI();
+    renderWeeks();
+  };
   document.getElementById("btnToggleView").onclick = () => {
     state.viewMode = isMobileView() ? "table" : "mobile";
     renderWeeks();

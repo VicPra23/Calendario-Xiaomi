@@ -1114,13 +1114,73 @@ dialog.modal::backdrop {
 .team-item,
 .ext-cal-item {
   display: grid;
-  grid-template-columns: 90px 1fr auto;
+  grid-template-columns: 20px 84px 1fr auto;
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
   background: #f9fafb;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+
+.team-item.dragging {
+  opacity: 0.45;
+  background: #fff7ed;
+}
+
+.team-item.drag-over-top {
+  box-shadow: inset 0 2.5px 0 #ff6900;
+}
+
+.team-item.drag-over-bottom {
+  box-shadow: inset 0 -2.5px 0 #ff6900;
+}
+
+.team-drag-handle {
+  cursor: grab;
+  color: #9ca3af;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  user-select: none;
+  line-height: 1;
+}
+
+.team-drag-handle:hover {
+  color: #4b5563;
+}
+
+.team-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-icon-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 28px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #374151;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.btn-icon-sm:hover:not(:disabled) {
+  background: #fff7ed;
+  border-color: #fb923c;
+  color: #ea580c;
+}
+
+.btn-icon-sm:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .ext-cal-item {

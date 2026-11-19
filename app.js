@@ -1901,17 +1901,85 @@ async function handleDeleteEvent() {
 }
 
 /* ---------- Gestión del Equipo y Correos ---------- */
+function moveTeamMember(fromIdx, toIdx) {
+  if (fromIdx === toIdx) return;
+  if (fromIdx < 0 || fromIdx >= state.team.length) return;
+  if (toIdx < 0 || toIdx >= state.team.length) return;
+  const [moved] = state.team.splice(fromIdx, 1);
+  state.team.splice(toIdx, 0, moved);
+  saveTeam();
+  if (APPS_SCRIPT_URL) postToAppsScript({ action: "saveTeam", team: state.team });
+  renderTeamList();
+  renderLegendAndSelects();
+  renderWeeks();
+}
+
 function renderTeamList() {
   const list = document.getElementById("teamList");
   list.innerHTML = "";
+  let draggedIdx = null;
+
   state.team.forEach((m, index) => {
     const row = document.createElement("div");
     row.className = "team-item";
+    row.draggable = true;
+    row.dataset.idx = String(index);
     row.innerHTML = `
+      <span class="team-drag-handle" title="Arrastra para reordenar" aria-hidden="true">⋮⋮</span>
       <strong>${escapeHtml(m.name)}</strong>
       <input type="email" value="${escapeHtml(m.email || "")}" placeholder="correo@empresa.com" data-idx="${index}" data-field="email" />
-      <button type="button" class="btn btn-secondary" data-remove-member="${index}" title="Eliminar">🗑</button>
+      <div class="team-item-actions">
+        <button type="button" class="btn-icon-sm" data-move-member="${index}" data-dir="-1" title="Subir posición" aria-label="Subir a ${escapeHtml(m.name)}" ${index === 0 ? "disabled" : ""}>▲</button>
+        <button type="button" class="btn-icon-sm" data-move-member="${index}" data-dir="1" title="Bajar posición" aria-label="Bajar a ${escapeHtml(m.name)}" ${index === state.team.length - 1 ? "disabled" : ""}>▼</button>
+        <button type="button" class="btn btn-secondary" data-remove-member="${index}" title="Eliminar">🗑</button>
+      </div>
     `;
+
+    row.ondragstart = (e) => {
+      if (e.target.closest("input, button")) {
+        e.preventDefault();
+        return;
+      }
+      draggedIdx = index;
+      row.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(index));
+    };
+
+    row.ondragover = (e) => {
+      if (draggedIdx === null || draggedIdx === index) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const rect = row.getBoundingClientRect();
+      const isTopHalf = e.clientY < rect.top + rect.height / 2;
+      row.classList.toggle("drag-over-top", isTopHalf);
+      row.classList.toggle("drag-over-bottom", !isTopHalf);
+    };
+
+    row.ondragleave = () => {
+      row.classList.remove("drag-over-top", "drag-over-bottom");
+    };
+
+    row.ondrop = (e) => {
+      e.preventDefault();
+      const wasTop = row.classList.contains("drag-over-top");
+      row.classList.remove("drag-over-top", "drag-over-bottom");
+      if (draggedIdx === null || draggedIdx === index) return;
+      let targetIdx = wasTop ? index : index + 1;
+      if (draggedIdx < targetIdx) targetIdx--;
+      const from = draggedIdx;
+      draggedIdx = null;
+      moveTeamMember(from, targetIdx);
+    };
+
+    row.ondragend = () => {
+      draggedIdx = null;
+      row.classList.remove("dragging");
+      list.querySelectorAll(".team-item").forEach((el) => {
+        el.classList.remove("drag-over-top", "drag-over-bottom");
+      });
+    };
+
     list.appendChild(row);
   });
 
@@ -1923,6 +1991,14 @@ function renderTeamList() {
       if (APPS_SCRIPT_URL) postToAppsScript({ action: "saveTeam", team: state.team });
       renderLegendAndSelects();
       renderWeeks();
+    };
+  });
+
+  list.querySelectorAll("[data-move-member]").forEach((btn) => {
+    btn.onclick = () => {
+      const idx = Number(btn.dataset.moveMember);
+      const dir = Number(btn.dataset.dir);
+      moveTeamMember(idx, idx + dir);
     };
   });
 

@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v66";
+const APP_VERSION = "v67";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
@@ -536,6 +536,7 @@ async function syncFromAppsScript(silent = false) {
       }
       updateSaveSummary();
       renderWeeks();
+      handleWidgetDeepLink();
       if (!silent) showToast("Calendario del grupo actualizado");
     }
   } catch (err) {
@@ -2776,6 +2777,27 @@ async function forceAppUpdate() {
   window.location.replace(url.toString());
 }
 
+let pendingWidgetAction = null;
+
+function handleWidgetDeepLink() {
+  if (!pendingWidgetAction) return;
+  const { action, member, editEventId } = pendingWidgetAction;
+  if (action === "new") {
+    pendingWidgetAction = null;
+    const targetMember =
+      member && state.team.some((m) => m.id === member) ? member : getSavedMobileMember();
+    openEventModal({ date: toIsoDate(new Date()), memberId: targetMember, fromMobile: true });
+    return;
+  }
+  if (editEventId) {
+    const found = state.events.find((ev) => ev.id === editEventId);
+    if (found) {
+      pendingWidgetAction = null;
+      openEventModal(found);
+    }
+  }
+}
+
 /* ---------- Inicialización y Eventos UI ---------- */
 document.addEventListener("DOMContentLoaded", () => {
   loadState();
@@ -2783,6 +2805,22 @@ document.addEventListener("DOMContentLoaded", () => {
   populateDateSelectors();
   renderWeeks();
   initGoogleAuth();
+
+  // Acciones directas desde el widget de Xiaomi (?action=new&member=... o ?editEvent=...)
+  const initParams = new URLSearchParams(window.location.search);
+  const wAction = initParams.get("action");
+  const wMember = initParams.get("member") || "";
+  const wEditId = initParams.get("editEvent") || "";
+  if (wAction === "new" || wEditId) {
+    pendingWidgetAction = { action: wAction, member: wMember, editEventId: wEditId };
+    initParams.delete("action");
+    initParams.delete("member");
+    initParams.delete("editEvent");
+    const cleanUrl =
+      window.location.pathname + (initParams.toString() ? `?${initParams.toString()}` : "") + window.location.hash;
+    window.history.replaceState({}, "", cleanUrl);
+    handleWidgetDeepLink();
+  }
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker

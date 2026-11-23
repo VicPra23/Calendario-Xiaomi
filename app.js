@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v67";
+const APP_VERSION = "v68";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
@@ -1989,14 +1989,22 @@ async function handleSaveEvent(e) {
     renderWeeks();
 
     if (APPS_SCRIPT_URL) {
-      showToast("Guardando evento y actualizando Google Calendar...", true);
+      // Si el usuario marcó añadir a su Google Calendar propio, lo abrimos en su propia cuenta (sin invitados ni Meet)
+      if (ev.syncGoogle) {
+        const gcalUrl = buildGoogleCalendarTemplateUrl(ev);
+        window.open(gcalUrl, "_blank", "noopener,noreferrer");
+      }
+      showToast("Guardando evento para el equipo...", true);
       const res = op ? await sendQueuedOperation(op) : await postToAppsScript({ action: "upsert", event: ev });
       if (!res?.ok) {
         showToast("Guardado en el dispositivo (pendiente de reintentar con Google).", true);
-      } else if (res.syncStatus === "error" || res.syncStatus === "no_recipients") {
-        showToast(`Guardado en la web, pero aviso en Calendar: ${res.syncError || res.syncStatus}`, true);
       } else {
-        showToast("Evento guardado para todo el grupo y actualizado en Google Calendar.", true);
+        showToast(
+          ev.syncGoogle
+            ? "Guardado para el equipo y abierto en tu Google Calendar propio."
+            : "Evento guardado para todo el grupo.",
+          true
+        );
       }
     } else if (ev.syncGoogle && state.accessToken) {
       try {
@@ -2221,12 +2229,12 @@ function buildGoogleCalendarTemplateUrl(ev) {
 
   const params = new URLSearchParams({
     action: "TEMPLATE",
-    text: `[${ev.memberId}] ${ev.title}`,
+    text: `${ev.tentative ? "[TENTATIVA] " : ""}[${ev.memberId}] ${ev.title}`,
     dates: datesParam,
     details: `Canal: ${ch?.label || ev.channelId}\nAsignado a: ${member?.name || ev.memberId}\n${ev.notes || ""}`,
   });
   if (ev.location) params.set("location", ev.location);
-  if (emails.length) params.set("add", emails.join(","));
+  // Sin parámetro "add" (0 invitados): así se crea como evento propio del usuario y Google nunca añade Meet
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 

@@ -1,9 +1,9 @@
-const CACHE_NAME = "cal-training-v68";
+const CACHE_NAME = "cal-training-v69";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=68",
-  "./app.js?v=68",
+  "./styles.css?v=69",
+  "./app.js?v=69",
   "./manifest.json",
   "./icon.svg",
   "./icon-192.png",

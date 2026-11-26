@@ -126,6 +126,7 @@ function doGet() {
       syncStatus: String(r[16] || (r[15] ? "synced" : "pending")),
       syncError: String(r[17] || ""),
       tentative: r[18] === true || r[18] === "true",
+      textAlign: String(r[19] || "left"),
     });
   }
 
@@ -150,15 +151,16 @@ function doPost(e) {
       ev.syncError = "";
 
       if (ev.syncGoogle !== false) {
-        try {
-          const result = upsertCalendarInvite_(ev, prevGoogleId);
-          ev.googleEventId = result.googleEventId || "";
-          ev.syncStatus = result.syncStatus;
-          ev.syncError = result.syncError || "";
-        } catch (err) {
-          ev.syncStatus = "error";
-          ev.syncError = String((err && err.message) || err);
-          Logger.log("Error sincronizando Google Calendar: " + ev.syncError);
+        // No colgamos eventos del equipo en el calendario personal del propietario del script
+        // (cada usuario añade su propio evento en su calendario desde la web, sin Meet ni invitaciones).
+        // Solo gestionamos el recordatorio por correo opcional si está activado.
+        ev.syncStatus = "self_calendar";
+        if (ev.emailMin && ev.emailMin !== "none") {
+          try {
+            maybeSendEmailReminderNow_(ev, resolveAttendeeEmails_(ev));
+          } catch (mailErr) {
+            Logger.log("Aviso enviando recordatorio por correo: " + mailErr);
+          }
         }
       } else if (prevGoogleId) {
         deleteGoogleEventById_(prevGoogleId);
@@ -172,6 +174,91 @@ function doPost(e) {
         syncStatus: ev.syncStatus,
         syncError: ev.syncError,
       });
+    }
+
+    if (action === "bulkImport" && Array.isArray(payload.events)) {
+      const existingRows = sheet.getDataRange().getValues();
+      const existingKeys = new Set();
+      for (let i = 1; i < existingRows.length; i++) {
+        const r = existingRows[i];
+        if (!r[0]) continue;
+        existingKeys.add(`${formatDateIso_(r[4])}|${String(r[2] || "")}|${String(r[1] || "").trim().toLowerCase()}`);
+      }
+      const syncCalendar = payload.syncCalendar === true;
+      const toAppend = [];
+      let syncedCount = 0;
+      let skippedCount = 0;
+      const nowIso = new Date().toISOString();
+
+      payload.events.forEach((ev) => {
+        const key = `${ev.date}|${ev.memberId}|${String(ev.title || "").trim().toLowerCase()}`;
+        if (existingKeys.has(key)) {
+          skippedCount++;
+          return;
+        }
+        existingKeys.add(key);
+        let googleId = "";
+        let syncStatus = syncCalendar ? "pending" : "disabled";
+        let syncError = "";
+        if (syncCalendar && ev.syncGoogle !== false) {
+          try {
+            const res = upsertCalendarInvite_(ev, null);
+            googleId = res.googleEventId || "";
+            syncStatus = res.syncStatus || "synced";
+            syncError = res.syncError || "";
+            if (googleId) syncedCount++;
+          } catch (err) {
+            syncStatus = "error";
+            syncError = String((err && err.message) || err);
+          }
+        }
+        toAppend.push([
+          ev.id,
+          ev.title || "",
+          ev.memberId || "COORD",
+          ev.channelId || "otros",
+          ev.date || "",
+          ev.startTime || "09:30",
+          ev.endTime || "10:30",
+          Boolean(ev.allDay),
+          ev.location || "",
+          ev.notes || "",
+          ev.popupMin || "60",
+          ev.emailMin || "none",
+          JSON.stringify(ev.groupAttendees || []),
+          syncCalendar && ev.syncGoogle !== false,
+          nowIso,
+          googleId,
+          syncStatus,
+          syncError,
+          Boolean(ev.tentative),
+          String(ev.textAlign || "left"),
+        ]);
+      });
+
+      if (toAppend.length > 0) {
+        const startRow = sheet.getLastRow() + 1;
+        sheet.getRange(startRow, 1, toAppend.length, 20).setValues(toAppend);
+      }
+      return jsonOut_({ ok: true, inserted: toAppend.length, skipped: skippedCount, syncedCalendar: syncedCount });
+    }
+
+    if (action === "cleanupImportedCalendar") {
+      const cal = getMasterCalendar_();
+      const calEvents = cal.getEvents(new Date(2026, 10, 22), new Date(2027, 0, 2));
+      let deletedCal = 0;
+      calEvents.forEach((ce) => {
+        const desc = String(ce.getDescription() || "");
+        if (desc.indexOf("(Enviado desde Calendario Training)") >= 0) {
+          try {
+            ce.deleteEvent();
+            deletedCal++;
+          } catch (err) {
+            Logger.log("No se pudo borrar evento: " + err);
+          }
+        }
+      });
+      return jsonOut_({ ok: true, deletedCalendarEvents: deletedCal });
     }
 
     if (action === "delete" && payload.id) {
@@ -357,6 +444,7 @@ function upsertRow_(sheet, ev) {
     ev.syncStatus || "",
     ev.syncError || "",
     Boolean(ev.tentative),
+    String(ev.textAlign || "left"),
   ];
 
   for (let i = 1; i < rows.length; i++) {

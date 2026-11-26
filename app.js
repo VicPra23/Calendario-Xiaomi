@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v68";
+const APP_VERSION = "v69";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
@@ -1267,8 +1267,11 @@ function renderEventPill(ev) {
   const ch = getChannel(ev.channelId);
   const pill = document.createElement("div");
   const isCut = state.clipboard?.mode === "cut" && state.clipboard.eventId === ev.id;
+  const alignCls =
+    ev.textAlign === "center" ? " align-center" : ev.textAlign === "right" ? " align-right" : " align-left";
   pill.className =
     "event-pill" +
+    alignCls +
     (ev.notes ? " has-notes" : "") +
     (ev.tentative ? " is-tentative" : "") +
     (isCut ? " cut-source" : "");
@@ -1479,6 +1482,7 @@ function openEventModal(data = {}) {
   );
   document.getElementById("evAllDay").checked = Boolean(data.allDay);
   setTentativeState(Boolean(data.tentative));
+  setTextAlignState(data.textAlign || "left");
   document.getElementById("evNotes").value = data.notes || "";
   document.getElementById("evReminderPopup").value = data.popupMin ?? "60";
 
@@ -1956,6 +1960,7 @@ async function handleSaveEvent(e) {
       endTime: endTimeVal,
       allDay: allDayVal,
       tentative: Boolean(document.getElementById("evTentative")?.checked),
+      textAlign: document.getElementById("evTextAlign")?.value || "left",
       location: "",
       notes: document.getElementById("evNotes").value.trim(),
       popupMin: document.getElementById("evReminderPopup").value,
@@ -2701,6 +2706,21 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+function setTextAlignState(align) {
+  const safe = align === "center" || align === "right" ? align : "left";
+  const hidden = document.getElementById("evTextAlign");
+  if (hidden) hidden.value = safe;
+  document.querySelectorAll(".align-btn[data-align]").forEach((btn) => {
+    const active = btn.dataset.align === safe;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  });
+  const titleEl = document.getElementById("evTitle");
+  const notesEl = document.getElementById("evNotes");
+  if (titleEl) titleEl.style.textAlign = safe;
+  if (notesEl) notesEl.style.textAlign = safe;
+}
+
 function setTentativeState(isTentative) {
   const cb = document.getElementById("evTentative");
   const btn = document.getElementById("btnToggleTentative");
@@ -2999,6 +3019,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const cb = document.getElementById("evTentative");
     setTentativeState(!cb?.checked);
   };
+  document.querySelectorAll(".align-btn[data-align]").forEach((btn) => {
+    btn.onclick = () => setTextAlignState(btn.dataset.align);
+  });
   document.getElementById("evNotes").addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();

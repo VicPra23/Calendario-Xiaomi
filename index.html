@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=68" />
+  <link rel="stylesheet" href="styles.css?v=69" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -158,11 +158,25 @@
             <input type="checkbox" id="evAllDay" />
             Todo el día (ej. Festivo, Día compensatorio, Back Office)
           </label>
-          <input type="checkbox" id="evTentative" class="hidden" />
-          <button type="button" id="btnToggleTentative" class="tentative-toggle-btn" aria-pressed="false" title="Marcar evento como tentativa (pendiente de confirmar)">
-            <span class="tentative-dot" aria-hidden="true"></span>
-            Tentativa
-          </button>
+          <div class="event-flags-right">
+            <input type="hidden" id="evTextAlign" value="left" />
+            <div class="align-toggle-group" role="group" aria-label="Alineación del texto">
+              <button type="button" class="align-btn active" data-align="left" title="Alinear a la izquierda" aria-label="Alinear a la izquierda" aria-pressed="true">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1" y="2.5" width="14" height="1.6" rx="0.8"/><rect x="1" y="7.2" width="10" height="1.6" rx="0.8"/><rect x="1" y="11.9" width="12" height="1.6" rx="0.8"/></svg>
+              </button>
+              <button type="button" class="align-btn" data-align="center" title="Centrar texto" aria-label="Centrar texto" aria-pressed="false">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1" y="2.5" width="14" height="1.6" rx="0.8"/><rect x="3" y="7.2" width="10" height="1.6" rx="0.8"/><rect x="2" y="11.9" width="12" height="1.6" rx="0.8"/></svg>
+              </button>
+              <button type="button" class="align-btn" data-align="right" title="Alinear a la derecha" aria-label="Alinear a la derecha" aria-pressed="false">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1" y="2.5" width="14" height="1.6" rx="0.8"/><rect x="5" y="7.2" width="10" height="1.6" rx="0.8"/><rect x="3" y="11.9" width="12" height="1.6" rx="0.8"/></svg>
+              </button>
+            </div>
+            <input type="checkbox" id="evTentative" class="hidden" />
+            <button type="button" id="btnToggleTentative" class="tentative-toggle-btn" aria-pressed="false" title="Marcar evento como tentativa (pendiente de confirmar)">
+              <span class="tentative-dot" aria-hidden="true"></span>
+              Tentativa
+            </button>
+          </div>
         </div>
 
         <div class="form-row">
@@ -344,6 +358,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=68"></script>
+  <script src="app.js?v=69"></script>
 </body>
 </html>

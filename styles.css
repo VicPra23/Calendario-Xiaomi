@@ -764,6 +764,70 @@ body {
   border: 1.5px dashed #d97706;
 }
 
+.event-pill.align-left {
+  text-align: left;
+}
+
+.event-pill.align-center {
+  text-align: center;
+}
+
+.event-pill.align-center .event-meta {
+  justify-content: center;
+  gap: 6px;
+}
+
+.event-pill.align-right {
+  text-align: right;
+}
+
+.event-pill.align-right .event-meta {
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.event-flags-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.align-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 2px;
+  gap: 2px;
+}
+
+.align-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.align-btn:hover {
+  background: #e2e8f0;
+  color: #111827;
+}
+
+.align-btn.active {
+  background: #ffffff;
+  color: #ff6900;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
 .tentative-badge {
   display: inline-flex;
   align-items: center;

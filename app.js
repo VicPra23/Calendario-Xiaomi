@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v70";
+const APP_VERSION = "v71";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
@@ -1997,22 +1997,14 @@ async function handleSaveEvent(e) {
     renderWeeks();
 
     if (APPS_SCRIPT_URL) {
-      // Si el usuario marcó añadir a su Google Calendar propio, lo abrimos en su propia cuenta (sin invitados ni Meet)
-      if (ev.syncGoogle) {
-        const gcalUrl = buildGoogleCalendarTemplateUrl(ev);
-        window.open(gcalUrl, "_blank", "noopener,noreferrer");
-      }
-      showToast("Guardando evento para el equipo...", true);
+      showToast("Guardando evento y sincronizando con Google Calendar...", true);
       const res = op ? await sendQueuedOperation(op) : await postToAppsScript({ action: "upsert", event: ev });
       if (!res?.ok) {
         showToast("Guardado en el dispositivo (pendiente de reintentar con Google).", true);
+      } else if (res.syncStatus === "error" || res.syncStatus === "no_recipients") {
+        showToast(`Guardado en la web, pero aviso en Calendar: ${res.syncError || res.syncStatus}`, true);
       } else {
-        showToast(
-          ev.syncGoogle
-            ? "Guardado para el equipo y abierto en tu Google Calendar propio."
-            : "Evento guardado para todo el grupo.",
-          true
-        );
+        showToast("Evento guardado y actualizado en Google Calendar (sin correos de invitación).", true);
       }
     } else if (ev.syncGoogle && state.accessToken) {
       try {

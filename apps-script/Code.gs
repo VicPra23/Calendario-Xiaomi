@@ -23,6 +23,25 @@ function getMasterCalendar_() {
   return CalendarApp.getCalendarById(id) || CalendarApp.getDefaultCalendar();
 }
 
+function getTeamSyncCalendar_() {
+  const props = PropertiesService.getScriptProperties();
+  const savedId = props.getProperty("TEAM_SYNC_CALENDAR_ID");
+  if (savedId) {
+    const existing = CalendarApp.getCalendarById(savedId);
+    if (existing) return existing;
+  }
+  const byName = CalendarApp.getCalendarsByName("Calendario Training (Equipo)");
+  if (byName && byName.length > 0) {
+    props.setProperty("TEAM_SYNC_CALENDAR_ID", byName[0].getId());
+    return byName[0];
+  }
+  const created = CalendarApp.createCalendar("Calendario Training (Equipo)", {
+    summary: "Calendario secundario automático para sincronizar eventos del equipo sin mezclarlos en el calendario personal.",
+  });
+  props.setProperty("TEAM_SYNC_CALENDAR_ID", created.getId());
+  return created;
+}
+
 const TEAM_MAP = {
   COORD: "victorprado@salesland.net",
   David: "davidotero@salesland.net",
@@ -151,16 +170,15 @@ function doPost(e) {
       ev.syncError = "";
 
       if (ev.syncGoogle !== false) {
-        // No colgamos eventos del equipo en el calendario personal del propietario del script
-        // (cada usuario añade su propio evento en su calendario desde la web, sin Meet ni invitaciones).
-        // Solo gestionamos el recordatorio por correo opcional si está activado.
-        ev.syncStatus = "self_calendar";
-        if (ev.emailMin && ev.emailMin !== "none") {
-          try {
-            maybeSendEmailReminderNow_(ev, resolveAttendeeEmails_(ev));
-          } catch (mailErr) {
-            Logger.log("Aviso enviando recordatorio por correo: " + mailErr);
-          }
+        try {
+          const result = upsertCalendarInvite_(ev, prevGoogleId);
+          ev.googleEventId = result.googleEventId || "";
+          ev.syncStatus = result.syncStatus;
+          ev.syncError = result.syncError || "";
+        } catch (err) {
+          ev.syncStatus = "error";
+          ev.syncError = String((err && err.message) || err);
+          Logger.log("Error sincronizando Google Calendar: " + ev.syncError);
         }
       } else if (prevGoogleId) {
         deleteGoogleEventById_(prevGoogleId);
@@ -398,27 +416,34 @@ function syncEditsFromGoogleCalendar_(sheet) {
 
 function deleteGoogleEventById_(googleEventId) {
   if (!googleEventId) return;
+  const cals = [getMasterCalendar_()];
   try {
-    const cal = getMasterCalendar_();
-    const gEv = cal.getEventById(googleEventId);
-    if (gEv) {
-      gEv.deleteEvent();
-      return;
-    }
-    // Respaldo por si el ID requiere búsqueda en rango
-    const now = new Date();
-    const events = cal.getEvents(
-      new Date(now.getFullYear(), now.getMonth() - 2, 1),
-      new Date(now.getFullYear(), now.getMonth() + 6, 0)
-    );
-    for (let i = 0; i < events.length; i++) {
-      if (events[i].getId() === googleEventId) {
-        events[i].deleteEvent();
+    const teamCal = getTeamSyncCalendar_();
+    if (teamCal && teamCal.getId() !== cals[0].getId()) cals.push(teamCal);
+  } catch (e) {}
+
+  for (let c = 0; c < cals.length; c++) {
+    try {
+      const cal = cals[c];
+      const gEv = cal.getEventById(googleEventId);
+      if (gEv) {
+        gEv.deleteEvent();
         return;
       }
+      const now = new Date();
+      const events = cal.getEvents(
+        new Date(now.getFullYear(), now.getMonth() - 3, 1),
+        new Date(now.getFullYear(), now.getMonth() + 6, 0)
+      );
+      for (let i = 0; i < events.length; i++) {
+        if (events[i].getId() === googleEventId) {
+          events[i].deleteEvent();
+          return;
+        }
+      }
+    } catch (err) {
+      Logger.log("No se pudo borrar evento previo de Google Calendar: " + err);
     }
-  } catch (err) {
-    Logger.log("No se pudo borrar evento previo de Google Calendar: " + err);
   }
 }
 
@@ -498,8 +523,12 @@ function upsertCalendarInvite_(ev, prevGoogleId) {
     };
   }
 
-  const hasExternalGuest = guests.some(isExternalNonGoogleEmail_);
-  const cal = getMasterCalendar_();
+  const ownerEmail = String(Session.getActiveUser().getEmail() || "victorprado@salesland.net").trim().toLowerCase();
+  const isOwnerOnly = guests.length === 1 && guests[0] === ownerEmail;
+  const cal = isOwnerOnly ? getMasterCalendar_() : getTeamSyncCalendar_();
+  const effectiveGuests = isOwnerOnly ? [] : guests;
+  const hasExternalGuest = effectiveGuests.some(isExternalNonGoogleEmail_);
+
   const title = `${ev.tentative ? "[TENTATIVA] " : ""}[${ev.memberId}] ${ev.title}`;
   const desc = `${ev.notes || ""}\n\n(Enviado desde Calendario Training)`;
   const tz = Session.getScriptTimeZone();
@@ -510,21 +539,46 @@ function upsertCalendarInvite_(ev, prevGoogleId) {
     throw new Error("La hora final debe ser posterior a la inicial");
   }
 
+  // Buscar evento existente en el calendario destino o en el calendario principal
   let event = prevGoogleId ? cal.getEventById(prevGoogleId) : null;
-  if (!event) {
+  let foundInOtherCal = false;
+  if (!event && prevGoogleId) {
+    const otherCal = isOwnerOnly ? getTeamSyncCalendar_() : getMasterCalendar_();
+    const otherEv = otherCal.getEventById(prevGoogleId);
+    if (otherEv) {
+      event = otherEv;
+      foundInOtherCal = true;
+    }
+  }
+
+  // En Apps Script CalendarApp no se puede convertir directamente un evento Todo el día <-> Con horario
+  // con setTime/setAllDayDate sin fallo; en ese caso (o si cambió de calendario) recreamos limpiamente sin correo.
+  const needsRecreate =
+    !event ||
+    foundInOtherCal ||
+    Boolean(event.isAllDayEvent()) !== Boolean(ev.allDay);
+
+  if (needsRecreate) {
+    if (event) {
+      try {
+        event.deleteEvent();
+      } catch (delErr) {
+        Logger.log("Aviso borrando evento previo al cambiar Todo el día/horario: " + delErr);
+      }
+    }
     const opts = {
       description: desc,
       location: ev.location || "",
-      guests: guests.join(","),
-      // Google Workspace (@salesland.net / Gmail) recibe el evento sin correo;
-      // dominios externos como @xiaomi.com (Outlook) necesitan sendInvites: true para que entre en su calendario.
       sendInvites: hasExternalGuest,
     };
+    if (effectiveGuests.length) {
+      opts.guests = effectiveGuests.join(",");
+    }
     event = ev.allDay
       ? cal.createAllDayEvent(title, eventDate, opts)
       : cal.createEvent(title, start, end, opts);
   } else {
-    // Actualiza el mismo evento in-place conservando ID y asistentes
+    // Actualiza el mismo evento in-place (funciona incluso en fechas/horas pasadas, sin enviar correo)
     event.setTitle(title);
     event.setDescription(desc);
     event.setLocation(ev.location || "");
@@ -533,11 +587,24 @@ function upsertCalendarInvite_(ev, prevGoogleId) {
 
     const existing = event.getGuestList().map((g) => g.getEmail().toLowerCase());
     existing.forEach((email) => {
-      if (guests.indexOf(email) < 0) event.removeGuest(email);
+      if (effectiveGuests.indexOf(email) < 0) event.removeGuest(email);
     });
-    guests.forEach((email) => {
+    effectiveGuests.forEach((email) => {
       if (existing.indexOf(email) < 0) event.addGuest(email);
     });
+  }
+
+  // Si la API avanzada de Google Calendar está activada, eliminamos cualquier Meet automático sin mandar avisos
+  try {
+    if (typeof Calendar !== "undefined" && Calendar.Events && typeof Calendar.Events.patch === "function") {
+      const rawId = String(event.getId()).split("@")[0];
+      Calendar.Events.patch({ conferenceData: null }, cal.getId(), rawId, {
+        conferenceDataVersion: 1,
+        sendUpdates: "none",
+      });
+    }
+  } catch (meetErr) {
+    Logger.log("Aviso limpiando conferenceData: " + meetErr);
   }
 
   event.setGuestsCanModify(true);

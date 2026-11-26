@@ -1318,6 +1318,10 @@ dialog.modal::backdrop {
   gap: 10px;
 }
 
+.form-grid-3.is-all-day {
+  grid-template-columns: 1fr;
+}
+
 .checkbox-label {
   flex-direction: row !important;
   align-items: center;

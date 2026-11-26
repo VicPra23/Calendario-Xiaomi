@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v69";
+const APP_VERSION = "v70";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
@@ -1780,13 +1780,13 @@ function applyQuickTime(inputId, nextVal, shouldClose = true) {
   if (shouldClose) closeQuickTimePopover();
 }
 
-function openQuickTimePopover(targetInputId, anchorEl) {
+function openQuickTimePopover(targetInputId, anchorEl, allowToggleClose = true) {
   const pop = document.getElementById("quickTimePopover");
   const input = document.getElementById(targetInputId);
   if (!pop || !input || input.disabled) return;
 
   if (!pop.classList.contains("hidden") && pop.dataset.target === targetInputId) {
-    closeQuickTimePopover();
+    if (allowToggleClose) closeQuickTimePopover();
     return;
   }
 
@@ -1923,6 +1923,9 @@ function toggleTimeInputs() {
   document.getElementById("evEndTime").disabled = allDay;
   document.getElementById("evStartTimeField")?.classList.toggle("disabled", allDay);
   document.getElementById("evEndTimeField")?.classList.toggle("disabled", allDay);
+  document.getElementById("evStartTimeLabel")?.classList.toggle("hidden", allDay);
+  document.getElementById("evEndTimeLabel")?.classList.toggle("hidden", allDay);
+  document.getElementById("evChannelTimeRow")?.classList.toggle("is-all-day", allDay);
   document.querySelectorAll(".time-picker-btn").forEach((btn) => {
     btn.disabled = allDay;
   });
@@ -3037,13 +3040,33 @@ document.addEventListener("DOMContentLoaded", () => {
       e.stopPropagation();
       const targetId = btn.dataset.timeTarget;
       const fieldEl = btn.closest(".time-field") || btn;
-      openQuickTimePopover(targetId, fieldEl);
+      openQuickTimePopover(targetId, fieldEl, true);
     };
+  });
+  ["evStartTime", "evEndTime"].forEach((timeId) => {
+    const inp = document.getElementById(timeId);
+    const fieldEl = inp?.closest(".time-field");
+    if (!inp || !fieldEl) return;
+    const openForInput = () => {
+      if (inp.disabled) return;
+      openQuickTimePopover(timeId, fieldEl, false);
+    };
+    inp.addEventListener("focus", openForInput);
+    inp.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openForInput();
+    });
+    fieldEl.addEventListener("click", (e) => {
+      if (e.target.closest(".time-picker-btn")) return;
+      e.stopPropagation();
+      inp.focus();
+      openForInput();
+    });
   });
   document.addEventListener("click", (e) => {
     const pop = document.getElementById("quickTimePopover");
     if (!pop || pop.classList.contains("hidden")) return;
-    if (pop.contains(e.target) || e.target.closest(".time-picker-btn")) return;
+    if (pop.contains(e.target) || e.target.closest(".time-field")) return;
     closeQuickTimePopover();
   });
   document.getElementById("eventModal")?.addEventListener("close", closeQuickTimePopover);

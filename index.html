@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=69" />
+  <link rel="stylesheet" href="styles.css?v=70" />
   <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -127,14 +127,14 @@
           </label>
         </div>
 
-        <div class="form-grid-3">
+        <div class="form-grid-3" id="evChannelTimeRow">
           <label>Canal (Color) *
             <div class="channel-select-wrap">
               <span id="evChannelDot" class="channel-color-dot" aria-hidden="true"></span>
               <select id="evChannel" required></select>
             </div>
           </label>
-          <label>Hora inicio
+          <label id="evStartTimeLabel">Hora inicio
             <div class="time-field" id="evStartTimeField">
               <input type="time" id="evStartTime" class="time-input" value="09:30" />
               <button type="button" class="time-picker-btn" data-time-target="evStartTime" title="Elegir hora rápida" aria-label="Elegir hora de inicio">
@@ -142,7 +142,7 @@
               </button>
             </div>
           </label>
-          <label>Hora fin
+          <label id="evEndTimeLabel">Hora fin
             <div class="time-field" id="evEndTimeField">
               <input type="time" id="evEndTime" class="time-input" value="10:30" />
               <button type="button" class="time-picker-btn" data-time-target="evEndTime" title="Elegir hora rápida" aria-label="Elegir hora de fin">
@@ -358,6 +358,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=69"></script>
+  <script src="app.js?v=70"></script>
 </body>
 </html>

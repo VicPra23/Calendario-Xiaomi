@@ -87,7 +87,7 @@ function getEventsSheet_() {
   return sheet;
 }
 
-function getTeamSheet_() {
+function getTeamSheet_(alreadyLocked) {
   const ss = getSpreadsheet_();
   let sheet = ss.getSheetByName(TEAM_SHEET_NAME);
   if (!sheet) {
@@ -95,9 +95,22 @@ function getTeamSheet_() {
     sheet.appendRow(["id", "name", "email"]);
   }
   if (sheet.getLastRow() <= 1) {
-    Object.keys(TEAM_MAP).forEach((id) => {
-      sheet.appendRow([id, id, TEAM_MAP[id]]);
-    });
+    let lock = null;
+    let lockedHere = false;
+    if (!alreadyLocked) {
+      lock = LockService.getScriptLock();
+      lockedHere = lock.tryLock(10000);
+    }
+    try {
+      if (sheet.getLastRow() <= 1) {
+        const defaults = Object.keys(TEAM_MAP).map((id) => [id, id, TEAM_MAP[id]]);
+        sheet.getRange(2, 1, defaults.length, 3).setValues(defaults);
+      }
+    } finally {
+      if (lockedHere && lock) {
+        lock.releaseLock();
+      }
+    }
   }
   return sheet;
 }
@@ -105,14 +118,20 @@ function getTeamSheet_() {
 function readTeamFromSheet_(teamSheet) {
   const rows = teamSheet.getDataRange().getValues();
   const team = [];
+  const seenIndex = {};
   for (let i = 1; i < rows.length; i++) {
     const id = String(rows[i][0] || "").trim();
     if (!id) continue;
-    team.push({
-      id: id,
-      name: String(rows[i][1] || id).trim(),
-      email: String(rows[i][2] || "").trim(),
-    });
+    const key = id.toLowerCase();
+    const name = String(rows[i][1] || id).trim();
+    const email = String(rows[i][2] || "").trim();
+    if (Object.prototype.hasOwnProperty.call(seenIndex, key)) {
+      const existing = team[seenIndex[key]];
+      if (!existing.email && email) existing.email = email;
+      continue;
+    }
+    seenIndex[key] = team.length;
+    team.push({ id, name, email });
   }
   return team;
 }
@@ -149,8 +168,8 @@ function doGet() {
     });
   }
 
-  const blockedDays = readVacationsAndHolidays_();
   const team = readTeamFromSheet_(teamSheet);
+  const blockedDays = readVacationsAndHolidays_(team);
   return jsonOut_({ ok: true, events, blockedDays, team });
 }
 
@@ -261,24 +280,6 @@ function doPost(e) {
       return jsonOut_({ ok: true, inserted: toAppend.length, skipped: skippedCount, syncedCalendar: syncedCount });
     }
 
-    if (action === "cleanupImportedCalendar") {
-      const cal = getMasterCalendar_();
-      const calEvents = cal.getEvents(new Date(2026, 10, 22), new Date(2027, 0, 2));
-      let deletedCal = 0;
-      calEvents.forEach((ce) => {
-        const desc = String(ce.getDescription() || "");
-        if (desc.indexOf("(Enviado desde Calendario Training)") >= 0) {
-          try {
-            ce.deleteEvent();
-            deletedCal++;
-          } catch (err) {
-            Logger.log("No se pudo borrar evento: " + err);
-          }
-        }
-      });
-      return jsonOut_({ ok: true, deletedCalendarEvents: deletedCal });
-    }
-
     if (action === "delete" && payload.id) {
       const prevGoogleId = findGoogleEventIdByLocalId_(sheet, payload.id) || payload.googleEventId;
       if (prevGoogleId) {
@@ -288,35 +289,52 @@ function doPost(e) {
       return jsonOut_({ ok: true });
     }
 
-    if (action === "replaceAll" && Array.isArray(payload.events)) {
-      const rows = sheet.getDataRange().getValues();
-      const nextIds = new Set(payload.events.map((x) => String(x.id)));
+    if (action === "addTeamMember" && payload.member && payload.member.id) {
+      const teamSheet = getTeamSheet_(true);
+      const m = payload.member;
+      const newId = String(m.id).trim();
+      const newName = String(m.name || newId).trim();
+      const newEmail = String(m.email || "").trim();
+      const rows = teamSheet.getDataRange().getValues();
       for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] && !nextIds.has(String(rows[i][0])) && rows[i][15]) {
-          deleteGoogleEventById_(String(rows[i][15]));
+        if (String(rows[i][0] || "").trim().toLowerCase() === newId.toLowerCase()) {
+          teamSheet.getRange(i + 1, 1, 1, 3).setValues([[newId, newName, newEmail]]);
+          return jsonOut_({ ok: true, team: readTeamFromSheet_(teamSheet) });
         }
       }
-      const lastRow = sheet.getLastRow();
-      if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
-      payload.events.forEach((ev) => {
-        if (ev.syncGoogle !== false && !ev.googleEventId) {
-          ev.googleEventId = sendCalendarInvite_(ev) || "";
-        }
-        upsertRow_(sheet, ev);
-      });
-      return jsonOut_({ ok: true });
+      teamSheet.appendRow([newId, newName, newEmail]);
+      return jsonOut_({ ok: true, team: readTeamFromSheet_(teamSheet) });
     }
 
     if (action === "saveTeam" && Array.isArray(payload.team)) {
-      const teamSheet = getTeamSheet_();
-      const lastRow = teamSheet.getLastRow();
-      if (lastRow > 1) teamSheet.deleteRows(2, lastRow - 1);
+      const teamSheet = getTeamSheet_(true);
+      const validRows = [];
+      const seenIndex = {};
       payload.team.forEach((m) => {
-        if (m && m.id) {
-          teamSheet.appendRow([String(m.id), String(m.name || m.id), String(m.email || "")]);
+        if (!m) return;
+        const id = String(m.id || "").trim();
+        if (!id) return;
+        const key = id.toLowerCase();
+        const row = [id, String(m.name || id).trim(), String(m.email || "").trim()];
+        if (Object.prototype.hasOwnProperty.call(seenIndex, key)) {
+          const prev = validRows[seenIndex[key]];
+          validRows[seenIndex[key]] = [row[0], row[1] || prev[1], row[2] || prev[2]];
+          return;
         }
+        seenIndex[key] = validRows.length;
+        validRows.push(row);
       });
-      return jsonOut_({ ok: true });
+      if (validRows.length === 0) {
+        return jsonOut_({ ok: false, error: "La lista del equipo no puede quedar vacía" });
+      }
+      // Escritura atómica sin vaciar primero la hoja (evita que lecturas simultáneas reinicien TEAM_MAP)
+      teamSheet.getRange(2, 1, validRows.length, 3).setValues(validRows);
+      const lastRow = teamSheet.getLastRow();
+      const excessStart = validRows.length + 2;
+      if (lastRow >= excessStart) {
+        teamSheet.deleteRows(excessStart, lastRow - excessStart + 1);
+      }
+      return jsonOut_({ ok: true, team: readTeamFromSheet_(teamSheet) });
     }
 
     return jsonOut_({ ok: false, error: "Acción no reconocida" });
@@ -337,17 +355,46 @@ function findGoogleEventIdByLocalId_(sheet, id) {
 
 function syncEditsFromGoogleCalendar_(sheet) {
   try {
+    const cache = CacheService.getScriptCache();
+    if (cache.get("GCAL_SYNC_THROTTLE")) return;
+    try {
+      cache.put("GCAL_SYNC_THROTTLE", "1", 120);
+    } catch (e) {}
+
     const rows = sheet.getDataRange().getValues();
     if (rows.length <= 1) return;
 
     const now = new Date();
     const minDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const maxDate = new Date(now.getFullYear(), now.getMonth() + 4, 0);
-    const cal = getMasterCalendar_();
-    const gEvents = cal.getEvents(minDate, maxDate);
+
+    const cals = [];
+    const seenCalIds = {};
+    const pushCal = (c) => {
+      if (!c) return;
+      const cid = c.getId();
+      if (seenCalIds[cid]) return;
+      seenCalIds[cid] = true;
+      cals.push(c);
+    };
+    pushCal(getMasterCalendar_());
+    try {
+      pushCal(getTeamSyncCalendar_());
+    } catch (e) {
+      Logger.log("Aviso obteniendo calendario de equipo: " + e);
+    }
+
     const byId = {};
-    gEvents.forEach((ge) => {
-      byId[ge.getId()] = ge;
+    let allCalsReadOk = true;
+    cals.forEach((cal) => {
+      try {
+        cal.getEvents(minDate, maxDate).forEach((ge) => {
+          byId[ge.getId()] = ge;
+        });
+      } catch (readErr) {
+        allCalsReadOk = false;
+        Logger.log("Error leyendo calendario en syncEditsFromGoogleCalendar_: " + readErr);
+      }
     });
 
     const tz = Session.getScriptTimeZone();
@@ -362,27 +409,46 @@ function syncEditsFromGoogleCalendar_(sheet) {
       if (!ge) {
         const rowDateIso = formatDateIso_(rows[i][4]);
         if (rowDateIso >= minIso && rowDateIso <= maxIso) {
-          // Si no aparece en getEvents(min, max), comprobamos si fue movido fuera del rango;
-          // si getEventById devuelve null O su fecha sigue dentro del rango, significa que está en la Papelera (borrado)
-          try {
-            ge = cal.getEventById(gId);
-          } catch (e) {
-            ge = null;
+          // Comprobamos en TODOS los calendarios (principal y equipo) antes de asumir que fue borrado
+          let lookupErrored = false;
+          for (let c = 0; c < cals.length; c++) {
+            try {
+              const found = cals[c].getEventById(gId);
+              if (found) {
+                ge = found;
+                break;
+              }
+            } catch (lookupErr) {
+              lookupErrored = true;
+            }
           }
           if (!ge) {
-            sheet.deleteRow(i + 1);
+            if (allCalsReadOk && !lookupErrored) {
+              sheet.deleteRow(i + 1);
+            }
             continue;
           }
           const geIso = Utilities.formatDate(ge.getStartTime(), tz, "yyyy-MM-dd");
           if (geIso >= minIso && geIso <= maxIso) {
-            sheet.deleteRow(i + 1);
+            if (allCalsReadOk && !lookupErrored) {
+              sheet.deleteRow(i + 1);
+            }
             continue;
           }
         } else {
           continue;
         }
       }
-      const rawTitle = ge.getTitle() || "";
+      let rawTitle = ge.getTitle() || "";
+      const prevTentative = rows[i][18] === true || rows[i][18] === "true";
+      let newTentative = prevTentative;
+      const tentMatch = rawTitle.match(/^\[TENTATIVA\]\s*(.*)$/i);
+      if (tentMatch) {
+        newTentative = true;
+        rawTitle = tentMatch[1];
+      } else if (prevTentative && /^\[[^\]]+\]\s*/.test(rawTitle)) {
+        newTentative = false;
+      }
       const roleMatch = rawTitle.match(/^\[([^\]]+)\]\s*(.*)$/);
       const newTitle = roleMatch ? roleMatch[2] : rawTitle;
       const newAllDay = ge.isAllDayEvent();
@@ -397,7 +463,8 @@ function syncEditsFromGoogleCalendar_(sheet) {
         newStart !== formatTimeHhMm_(rows[i][5], "09:30") ||
         newEnd !== formatTimeHhMm_(rows[i][6], "11:30") ||
         newAllDay !== (rows[i][7] === true || rows[i][7] === "true") ||
-        newLoc !== String(rows[i][8] || "");
+        newLoc !== String(rows[i][8] || "") ||
+        newTentative !== prevTentative;
 
       if (changed) {
         sheet.getRange(i + 1, 2).setValue(newTitle);
@@ -407,6 +474,7 @@ function syncEditsFromGoogleCalendar_(sheet) {
         sheet.getRange(i + 1, 8).setValue(newAllDay);
         sheet.getRange(i + 1, 9).setValue(newLoc);
         sheet.getRange(i + 1, 15).setValue(new Date().toISOString());
+        sheet.getRange(i + 1, 19).setValue(newTentative);
       }
     }
   } catch (err) {
@@ -499,7 +567,7 @@ function resolveAttendeeEmails_(ev) {
     }
   };
   const lookup = {};
-  readTeamFromSheet_(getTeamSheet_()).forEach((m) => {
+  readTeamFromSheet_(getTeamSheet_(true)).forEach((m) => {
     lookup[m.id] = m.email || "";
   });
   // Solo notificar a la persona responsable de la tarea (sin añadir otros compañeros como invitados)
@@ -785,11 +853,29 @@ function activarRecordatoriosPorCorreo() {
   Logger.log("Activador de recordatorios por correo configurado cada 5 minutos.");
 }
 
-function sendCalendarInvite_(ev) {
-  return upsertCalendarInvite_(ev, null).googleEventId || "";
-}
+function readVacationsAndHolidays_(teamList) {
+  const dynamicTeam = Array.isArray(teamList) ? teamList : [];
+  const curYear = new Date().getFullYear();
+  const festYears = [curYear, curYear + 1];
 
-function readVacationsAndHolidays_() {
+  const teamSig = dynamicTeam.map((m) => `${m.id || ""}|${m.name || ""}|${m.email || ""}`).join(";");
+  let teamHash = String(teamSig.length);
+  try {
+    const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, teamSig);
+    teamHash = digest.map((b) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
+  } catch (e) {}
+  const cacheKey = `BLOCKED_DAYS_V2_${curYear}_${teamHash}`;
+  const cache = CacheService.getScriptCache();
+  try {
+    const cachedRaw = cache.get(cacheKey);
+    if (cachedRaw) {
+      const parsed = JSON.parse(cachedRaw);
+      if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {}
+
   const blocked = {};
   try {
     const ss = SpreadsheetApp.openById(VACATIONS_SHEET_ID);
@@ -797,12 +883,12 @@ function readVacationsAndHolidays_() {
     if (festSheet) {
       const rows = festSheet.getDataRange().getValues();
       for (let r = 1; r < rows.length; r++) {
-        const memberId = mapUser_(rows[r][0]) || mapUser_(rows[r][1]);
+        const memberId = mapUser_(rows[r][0], dynamicTeam) || mapUser_(rows[r][1], dynamicTeam);
         if (!memberId) continue;
         for (let c = 3; c < rows[r].length; c++) {
           const val = rows[r][c];
           if (!val) continue;
-          [2026, 2027].forEach((yr) => {
+          festYears.forEach((yr) => {
             const iso = parseShortDate_(val, yr);
             if (iso) blocked[`${memberId}|${iso}`] = { type: "FESTIVO", label: "FESTIVO" };
           });
@@ -816,25 +902,31 @@ function readVacationsAndHolidays_() {
       for (let r = 1; r < rows.length; r++) {
         const estado = String(rows[r][5] || "").trim().toLowerCase();
         if (estado !== "aprobado") continue;
-        const memberId = mapUser_(rows[r][1]);
+        const memberId = mapUser_(rows[r][1], dynamicTeam) || mapUser_(rows[r][0], dynamicTeam);
         if (!memberId) continue;
         const fechaTxt = String(rows[r][2] || "").trim();
         const opcion = String(rows[r][4] || "Vacaciones").toUpperCase();
         const label = opcion.indexOf("EXTRA") >= 0 ? "DÍA EXTRA" : "VACACIONES";
         const rangeMatch = fechaTxt.match(/del\s+(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s+al\s+(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/i);
         if (rangeMatch) {
-          const s = parseShortDateObj_(rangeMatch[1], 2026);
-          const e = parseShortDateObj_(rangeMatch[2], 2026);
+          const s = parseShortDateObj_(rangeMatch[1], curYear);
+          const e = parseShortDateObj_(rangeMatch[2], curYear);
           if (s && e) {
             for (let d = new Date(s), g = 0; d <= e && g < 90; d.setDate(d.getDate() + 1), g++) {
               blocked[`${memberId}|${formatDateIso_(d)}`] = { type: label, label };
             }
           }
         } else {
-          const iso = parseShortDate_(fechaTxt, 2026);
+          const iso = parseShortDate_(fechaTxt, curYear);
           if (iso) blocked[`${memberId}|${iso}`] = { type: label, label };
         }
       }
+    }
+
+    if (Object.keys(blocked).length > 0) {
+      try {
+        cache.put(cacheKey, JSON.stringify(blocked), 600);
+      } catch (e) {}
     }
   } catch (err) {
     Logger.log("Error leyendo Usuarios APP: " + err);
@@ -842,16 +934,44 @@ function readVacationsAndHolidays_() {
   return blocked;
 }
 
-function mapUser_(raw) {
-  const s = String(raw || "").trim().toLowerCase();
+function normStr_(val) {
+  return String(val || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function mapUser_(raw, teamList) {
+  const s = normStr_(raw);
   if (!s) return null;
-  if (s === "tm" || s.indexOf("tomás") >= 0 || s.indexOf("tomas") >= 0) return "TM1";
+  if (s === "tm" || s.indexOf("tomas") >= 0) return "TM1";
   if (s === "ts" || s.indexOf("fabio") >= 0) return "TS1";
   if (s === "tn" || s.indexOf("hamza") >= 0) return "TN1";
   if (s === "tb" || s.indexOf("carles") >= 0) return "TB1";
   if (s === "tl" || s.indexOf("francisco") >= 0) return "TL1";
   if (s.indexOf("coordinator") >= 0 || s === "coord" || s.indexOf("victor") >= 0) return "COORD";
   if (s.indexOf("creator") >= 0 || s.indexOf("david") >= 0) return "David";
+
+  // Emparejamiento dinámico con cualquier usuario creado en EQUIPO_WEB (por ID, nombre, correo o primer nombre del correo)
+  const list = Array.isArray(teamList) ? teamList : [];
+  for (let i = 0; i < list.length; i++) {
+    const m = list[i];
+    if (!m || !m.id) continue;
+    const idNorm = normStr_(m.id);
+    const nameNorm = normStr_(m.name);
+    const emailNorm = normStr_(m.email);
+    const emailLocal = emailNorm.split("@")[0] || "";
+    const firstWord = s.split(/[\s._-]+/)[0] || "";
+    if (
+      (idNorm && (s === idNorm || s.indexOf(idNorm) >= 0)) ||
+      (nameNorm && (s === nameNorm || s.indexOf(nameNorm) >= 0)) ||
+      (emailNorm && s === emailNorm) ||
+      (emailLocal && firstWord.length >= 4 && emailLocal.indexOf(firstWord) === 0)
+    ) {
+      return m.id;
+    }
+  }
   return null;
 }
 

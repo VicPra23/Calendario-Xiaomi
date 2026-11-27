@@ -3,7 +3,7 @@
    ========================================================================== */
 
 // Versión actual de la aplicación (comparada con version.json para mostrar el aviso de actualización)
-const APP_VERSION = "v71";
+const APP_VERSION = "v73";
 
 // Pega aquí la URL /exec de tu Google Apps Script para que TODO el equipo vea y comparta los mismos eventos en tiempo real (0 €):
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzBlkQgHjuAWBxDGj5Pb9vmFV-9rZSa121HD0CSX5rpGslarqXfg5C8lFzyDJKDaylz/exec";
@@ -12,8 +12,6 @@ const STORAGE_KEYS = {
   EVENTS: "cal_xiaomi_events_v2",
   OUTBOX: "cal_xiaomi_outbox_v1",
   TEAM: "cal_xiaomi_team_v1",
-  EXT_CALENDARS: "cal_xiaomi_ext_cals_v1",
-  GOOGLE_CFG: "cal_xiaomi_google_cfg_v1",
   BLOCKED_DAYS: "cal_xiaomi_blocked_days_v2",
   MOBILE_LAST_MEMBER: "cal_xiaomi_mobile_last_member_v1",
   HIDE_WEEKENDS: "cal_xiaomi_hide_weekends_v1",
@@ -139,15 +137,6 @@ const DEFAULT_TEAM = [
   { id: "TN1", name: "TN1", email: "hamzagaya@salesland.net", calendarId: "hamzagaya@salesland.net" },
 ];
 
-const DEFAULT_EXT_CALENDARS = [
-  {
-    id: "es.spain#holiday@group.v.calendar.google.com",
-    name: "Festivos España",
-    color: "#a60054",
-    enabled: true,
-  },
-];
-
 // Calendario limpio listo para producción (sin eventos de prueba)
 const SEED_EVENTS = [];
 
@@ -158,15 +147,6 @@ let state = {
   externalEvents: [],
   blockedDays: {}, // key: "memberId|YYYY-MM-DD" -> { type, label }
   team: [],
-  extCalendars: [],
-  googleCfg: {
-    clientId: "",
-    primaryCalendarId: "primary",
-    vacationsSheetId: DEFAULT_VACATIONS_SHEET_ID,
-  },
-  accessToken: null,
-  tokenClient: null,
-  syncTimer: null,
   clipboard: null, // { mode: "copy" | "cut", eventId: string }
   viewMode: "auto", // "auto" | "table" | "mobile"
   calendarMode: "month", // "week" | "month" | "agenda"
@@ -249,14 +229,6 @@ function loadState() {
       saveTeam();
     }
 
-    const ec = localStorage.getItem(STORAGE_KEYS.EXT_CALENDARS);
-    state.extCalendars = ec ? JSON.parse(ec) : DEFAULT_EXT_CALENDARS;
-
-    const gc = localStorage.getItem(STORAGE_KEYS.GOOGLE_CFG);
-    if (gc) {
-      state.googleCfg = { vacationsSheetId: DEFAULT_VACATIONS_SHEET_ID, ...JSON.parse(gc) };
-    }
-
     const bd = localStorage.getItem(STORAGE_KEYS.BLOCKED_DAYS);
     if (bd && Object.keys(JSON.parse(bd)).length > 0) {
       state.blockedDays = JSON.parse(bd);
@@ -278,7 +250,11 @@ function loadState() {
 }
 
 function saveBlockedDays() {
-  localStorage.setItem(STORAGE_KEYS.BLOCKED_DAYS, JSON.stringify(state.blockedDays));
+  try {
+    localStorage.setItem(STORAGE_KEYS.BLOCKED_DAYS, JSON.stringify(state.blockedDays));
+  } catch (e) {
+    console.warn("No se pudieron guardar los días bloqueados en localStorage:", e);
+  }
 }
 
 function getSavedMobileMember() {
@@ -305,7 +281,11 @@ let lastWriteTimestamp = 0;
 let syncEpoch = 0;
 
 function saveOutbox() {
-  localStorage.setItem(STORAGE_KEYS.OUTBOX, JSON.stringify(state.outbox || {}));
+  try {
+    localStorage.setItem(STORAGE_KEYS.OUTBOX, JSON.stringify(state.outbox || {}));
+  } catch (e) {
+    console.warn("No se pudo guardar la cola de cambios en localStorage:", e);
+  }
 }
 
 function eventContent(ev) {
@@ -529,7 +509,7 @@ async function syncFromAppsScript(silent = false) {
         state.blockedDays = data.blockedDays;
         saveBlockedDays();
       }
-      if (Array.isArray(data.team) && data.team.length > 0) {
+      if (Array.isArray(data.team) && data.team.length > 0 && !document.getElementById("teamModal")?.open) {
         state.team = data.team;
         saveTeam();
         if (!document.getElementById("eventModal")?.open) renderLegendAndSelects();
@@ -569,33 +549,37 @@ async function postToAppsScript(payload) {
 }
 
 function saveEvents() {
-  localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(state.events));
+  try {
+    localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(state.events));
+  } catch (e) {
+    console.warn("No se pudieron guardar los eventos en localStorage:", e);
+    if (e?.name === "QuotaExceededError") {
+      showToast("Memoria local del navegador llena: los cambios siguen guardándose en Google.");
+    }
+  }
 }
 
 function saveTeam() {
-  localStorage.setItem(STORAGE_KEYS.TEAM, JSON.stringify(state.team));
-}
-
-function saveExtCalendars() {
-  localStorage.setItem(STORAGE_KEYS.EXT_CALENDARS, JSON.stringify(state.extCalendars));
-}
-
-function saveGoogleCfg() {
-  localStorage.setItem(STORAGE_KEYS.GOOGLE_CFG, JSON.stringify(state.googleCfg));
+  try {
+    localStorage.setItem(STORAGE_KEYS.TEAM, JSON.stringify(state.team));
+  } catch (e) {
+    console.warn("No se pudo guardar el equipo en localStorage:", e);
+  }
 }
 
 /* ---------- Toast, Deshacer & Notificaciones ---------- */
 let toastTimer;
-let lastUndoSnapshot = null;
+let lastUndoAction = null;
 
 function showToast(msg, withUndo = false) {
-  const el = document.getElementById("toast");
+  const el = typeof document?.getElementById === "function" ? document.getElementById("toast") : null;
+  if (!el) return;
   el.innerHTML = "";
   const span = document.createElement("span");
   span.textContent = msg;
   el.appendChild(span);
 
-  if (withUndo && lastUndoSnapshot) {
+  if (withUndo && lastUndoAction) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "toast-undo-btn";
@@ -609,58 +593,56 @@ function showToast(msg, withUndo = false) {
   toastTimer = setTimeout(() => el.classList.add("hidden"), withUndo ? 8000 : 3800);
 }
 
-function saveUndoSnapshot(label) {
-  lastUndoSnapshot = {
-    events: JSON.parse(JSON.stringify(state.events)),
+function saveUndoAction(label, ops = []) {
+  lastUndoAction = {
     label,
+    ops: (ops || []).map((op) => ({
+      id: op.id,
+      before: op.before ? JSON.parse(JSON.stringify(op.before)) : null,
+      after: op.after ? JSON.parse(JSON.stringify(op.after)) : null,
+    })),
   };
-  document.getElementById("btnUndo")?.classList.remove("hidden");
+  if (typeof document?.getElementById === "function") {
+    document.getElementById("btnUndo")?.classList.remove("hidden");
+  }
 }
 
 async function performUndo() {
-  if (!lastUndoSnapshot) return;
-  const snap = lastUndoSnapshot;
-  lastUndoSnapshot = null;
-  document.getElementById("btnUndo")?.classList.add("hidden");
-
-  const prevEvents = state.events;
-  const prevMap = new Map(prevEvents.map((e) => [e.id, e]));
-  const snapIds = new Set(snap.events.map((e) => e.id));
-
-  state.events = snap.events;
-  saveEvents();
-  renderWeeks();
-
-  if (APPS_SCRIPT_URL) {
-    // Deshacer por ID a través de la cola outbox para no pisar eventos de otros compañeros
-    for (const oldEv of prevEvents) {
-      if (!snapIds.has(oldEv.id)) {
-        const op = queueEventChange("delete", oldEv);
-        if (op) await sendQueuedOperation(op);
-      }
-    }
-    for (const ev of state.events) {
-      const prev = prevMap.get(ev.id);
-      if (!prev || JSON.stringify(eventContent(prev)) !== JSON.stringify(eventContent(ev))) {
-        const op = queueEventChange("upsert", ev);
-        if (op) await sendQueuedOperation(op);
-      }
-    }
-    saveEvents();
-  } else if (state.accessToken) {
-    for (const ev of state.events) {
-      if (ev.syncGoogle && !prevMap.has(ev.id)) {
-        try {
-          const synced = await upsertGoogleCalendarEvent({ ...ev, googleEventId: null });
-          ev.googleEventId = synced.id;
-        } catch (err) {
-          console.warn("Error restaurando evento en Google:", err);
-        }
-      }
-    }
-    saveEvents();
+  if (!lastUndoAction) return;
+  const action = lastUndoAction;
+  lastUndoAction = null;
+  if (typeof document?.getElementById === "function") {
+    document.getElementById("btnUndo")?.classList.add("hidden");
   }
-  showToast(`Deshecho: ${snap.label}`);
+
+  const queuedOps = [];
+  action.ops.forEach((op) => {
+    const idx = state.events.findIndex((e) => e.id === op.id);
+    if (!op.before) {
+      const target = (idx >= 0 ? state.events[idx] : null) || op.after;
+      if (idx >= 0) state.events.splice(idx, 1);
+      if (APPS_SCRIPT_URL && target) {
+        const queued = queueEventChange("delete", target);
+        if (queued) queuedOps.push(queued);
+      }
+    } else {
+      const restored = JSON.parse(JSON.stringify(op.before));
+      if (idx >= 0) state.events[idx] = restored;
+      else state.events.push(restored);
+      if (APPS_SCRIPT_URL) {
+        const queued = queueEventChange("upsert", restored);
+        if (queued) queuedOps.push(queued);
+      }
+    }
+  });
+
+  saveEvents();
+  if (typeof renderWeeks === "function") renderWeeks();
+
+  for (const queued of queuedOps) {
+    await sendQueuedOperation(queued);
+  }
+  showToast(`Deshecho: ${action.label}`);
 }
 
 /* ---------- Renderizado de Leyenda y Selectores ---------- */
@@ -926,6 +908,7 @@ function renderMobileWeeks() {
   const todayIso = toIsoDate(new Date());
   const dayNames = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
   const visibleMembers = state.team.filter((m) => isMemberVisible(m.id));
+  const eventsIndex = buildFilteredEventsIndex();
 
   for (const weekStart of weeks) {
     const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -1005,7 +988,7 @@ function renderMobileWeeks() {
       let anyEvent = false;
       visibleMembers.forEach((member) => {
         const blocked = getBlockedInfo(iso, member.id);
-        const cellEvents = getFilteredEventsForCell(iso, member.id);
+        const cellEvents = eventsIndex.get(`${member.id}|${iso}`) || [];
         if (!blocked && !cellEvents.length) return;
         anyEvent = true;
 
@@ -1055,6 +1038,7 @@ function renderTableWeeks() {
   const weeks = getVisibleWeeks();
   const todayIso = toIsoDate(new Date());
   const weekdayLetters = ["L", "M", "X", "J", "V", "S", "D"];
+  const eventsIndex = buildFilteredEventsIndex();
 
   for (const weekStart of weeks) {
     const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -1220,7 +1204,7 @@ function renderTableWeeks() {
           stack.appendChild(blkEl);
         }
 
-        const cellEvents = getFilteredEventsForCell(iso, member.id);
+        const cellEvents = eventsIndex.get(`${member.id}|${iso}`) || [];
         cellEvents.forEach((ev) => {
           const pill = renderEventPill(ev);
           stack.appendChild(pill);
@@ -1239,28 +1223,42 @@ function renderTableWeeks() {
   }
 }
 
-function getFilteredEventsForCell(dateIso, memberId) {
+function buildFilteredEventsIndex() {
   const q = state.filters.search.trim().toLowerCase();
   const chFilter = state.filters.channel;
-
+  const index = new Map();
   const all = [...state.events, ...state.externalEvents];
-  return all
-    .filter((ev) => {
-      if (ev.date !== dateIso) return false;
-      if (ev.memberId !== memberId) return false;
-      if (chFilter !== "all" && getChannel(ev.channelId).id !== chFilter) return false;
-      if (q) {
-        const hay = `${ev.title} ${ev.location || ""} ${ev.notes || ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    })
-    .sort((a, b) => {
+
+  all.forEach((ev) => {
+    if (!ev || !ev.date || !ev.memberId) return;
+    if (chFilter !== "all" && getChannel(ev.channelId).id !== chFilter) return;
+    if (q) {
+      const hay = `${ev.title} ${ev.location || ""} ${ev.notes || ""}`.toLowerCase();
+      if (!hay.includes(q)) return;
+    }
+    const key = `${ev.memberId}|${ev.date}`;
+    let bucket = index.get(key);
+    if (!bucket) {
+      bucket = [];
+      index.set(key, bucket);
+    }
+    bucket.push(ev);
+  });
+
+  index.forEach((bucket) => {
+    bucket.sort((a, b) => {
       if (Boolean(a.allDay) !== Boolean(b.allDay)) return a.allDay ? -1 : 1;
       return normalizeTimeStr(a.startTime, "00:00").localeCompare(
         normalizeTimeStr(b.startTime, "00:00")
       );
     });
+  });
+
+  return index;
+}
+
+function getFilteredEventsForCell(dateIso, memberId) {
+  return buildFilteredEventsIndex().get(`${memberId}|${dateIso}`) || [];
 }
 
 function renderEventPill(ev) {
@@ -1495,9 +1493,6 @@ function openEventModal(data = {}) {
 
   document.getElementById("evSyncGoogle").checked = data.syncGoogle !== false;
 
-  // Renderizar solo miembros del grupo (nunca invitados externos)
-  renderGroupAttendeeChips(resolvedMemberId, data.groupAttendees || []);
-
   // Si viene de hacer clic en una celda concreta con usuario definido (nuevo evento), mostramos resumen compacto
   const isNewWithContext = !isEdit && Boolean(data.date && resolvedMemberId);
   const badge = document.getElementById("evContextBadge");
@@ -1571,8 +1566,12 @@ async function pasteClipboardTo(targetDate, targetMemberId) {
   const ok = await confirmAvailability(candidate, isCopy ? [] : [eventId]);
   if (!ok) return;
 
-  saveUndoSnapshot(`${isCopy ? "Pegar copia" : "Pegar (cortado)"} "${orig.title}"`);
-  await moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy);
+  const delta = await moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy);
+  if (delta) {
+    saveUndoAction(`${isCopy ? "Pegar copia" : "Pegar (cortado)"} "${orig.title}"`, [
+      { id: delta.after.id, before: delta.before, after: delta.after },
+    ]);
+  }
   if (!isCopy) {
     clearClipboard();
   }
@@ -1637,24 +1636,15 @@ async function executeDropAction(mode) {
   pendingDrop = null;
   document.getElementById("dropActionModal").close();
 
-  saveUndoSnapshot(`${mode === "replace" ? "Sustituir" : mode === "copy" ? "Copiar" : "Mover"} "${orig.title}"`);
+  const undoOps = [];
 
   // Si es sustituir, eliminamos los eventos previos de esa celda destino
   if (mode === "replace") {
     for (const rem of toRemove) {
+      undoOps.push({ id: rem.id, before: eventContent(rem), after: null });
       if (APPS_SCRIPT_URL) {
         const op = queueEventChange("delete", rem);
         if (op) await sendQueuedOperation(op);
-      } else if (rem.googleEventId && state.accessToken) {
-        try {
-          const calId = encodeURIComponent(rem.googleCalId || "primary");
-          await gFetch(
-            `https://www.googleapis.com/calendar/v3/calendars/${calId}/events/${rem.googleEventId}`,
-            { method: "DELETE" }
-          );
-        } catch (err) {
-          console.warn("No se pudo eliminar evento sustituido en Google:", err);
-        }
       }
     }
     state.events = state.events.filter(
@@ -1663,7 +1653,16 @@ async function executeDropAction(mode) {
   }
 
   const isCopy = mode === "copy";
-  await moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy);
+  const delta = await moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy);
+  if (delta) {
+    undoOps.push({ id: delta.after.id, before: delta.before, after: delta.after });
+  }
+  if (undoOps.length) {
+    saveUndoAction(
+      `${mode === "replace" ? "Sustituir" : mode === "copy" ? "Copiar" : "Mover"} "${orig.title}"`,
+      undoOps
+    );
+  }
   if (mode === "replace") {
     showToast(`Celda de ${targetMemberId} (${targetDate}) sustituida`, true);
   }
@@ -1683,10 +1682,11 @@ function buildAttendeeEmails(memberId, groupAttendees = []) {
 
 async function moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy) {
   const orig = state.events.find((x) => x.id === eventId);
-  if (!orig) return;
+  if (!orig) return null;
 
-  if (!isCopy && orig.date === targetDate && orig.memberId === targetMemberId) return;
+  if (!isCopy && orig.date === targetDate && orig.memberId === targetMemberId) return null;
 
+  const beforeSnap = isCopy ? null : eventContent(orig);
   const updated = isCopy
     ? {
         ...orig,
@@ -1704,16 +1704,6 @@ async function moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy) {
         attendeeEmails: buildAttendeeEmails(targetMemberId, orig.groupAttendees),
       };
 
-  if (updated.syncGoogle && state.accessToken) {
-    try {
-      const synced = await upsertGoogleCalendarEvent(updated);
-      updated.googleEventId = synced.id;
-      updated.googleCalId = state.googleCfg.primaryCalendarId || "primary";
-    } catch (err) {
-      console.warn("Error sincronizando movimiento/copia en Google:", err);
-    }
-  }
-
   if (isCopy) {
     state.events.push(updated);
     showToast(`Evento copiado a ${targetMemberId} (${targetDate})`, true);
@@ -1729,12 +1719,7 @@ async function moveOrCopyEvent(eventId, targetDate, targetMemberId, isCopy) {
     const op = queueEventChange("upsert", updated);
     if (op) sendQueuedOperation(op);
   }
-}
-
-function renderGroupAttendeeChips(primaryMemberId, selectedIds = []) {
-  const container = document.getElementById("evGroupAttendees");
-  if (!container) return;
-  container.innerHTML = "";
+  return { before: beforeSnap, after: eventContent(updated) };
 }
 
 function addOneHour(hhmm) {
@@ -1951,6 +1936,8 @@ async function handleSaveEvent(e) {
     const allDayVal = document.getElementById("evAllDay").checked;
 
     const id = document.getElementById("evId").value || `ev-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const existingIdx = state.events.findIndex((item) => item.id === id);
+    const existingEv = existingIdx >= 0 ? state.events[existingIdx] : null;
     const ev = {
       id,
       googleEventId: document.getElementById("evGoogleId").value || null,
@@ -1964,16 +1951,14 @@ async function handleSaveEvent(e) {
       allDay: allDayVal,
       tentative: Boolean(document.getElementById("evTentative")?.checked),
       textAlign: document.getElementById("evTextAlign")?.value || "left",
-      location: "",
+      location: existingEv?.location || "",
       notes: document.getElementById("evNotes").value.trim(),
       popupMin: document.getElementById("evReminderPopup").value,
       emailMin: document.getElementById("evEnableEmailAlert").checked
         ? document.getElementById("evReminderEmail").value
         : "none",
       syncGoogle: document.getElementById("evSyncGoogle").checked,
-      groupAttendees: Array.from(
-        document.querySelectorAll("#evGroupAttendees input:checked")
-      ).map((cb) => cb.value),
+      groupAttendees: existingEv?.groupAttendees || [],
     };
     ev.attendeeEmails = buildAttendeeEmails(ev.memberId, ev.groupAttendees);
 
@@ -1984,11 +1969,12 @@ async function handleSaveEvent(e) {
       saveMobileMember(ev.memberId);
     }
 
-    const idx = state.events.findIndex((item) => item.id === id);
-    saveUndoSnapshot(idx >= 0 ? `Editar "${ev.title}"` : `Crear "${ev.title}"`);
+    saveUndoAction(existingIdx >= 0 ? `Editar "${ev.title}"` : `Crear "${ev.title}"`, [
+      { id, before: existingEv ? eventContent(existingEv) : null, after: eventContent(ev) },
+    ]);
 
     // Guardado optimista inmediato: cierra el modal al instante para evitar dobles clics
-    if (idx >= 0) state.events[idx] = ev;
+    if (existingIdx >= 0) state.events[existingIdx] = ev;
     else state.events.push(ev);
 
     const op = queueEventChange("upsert", ev);
@@ -2006,22 +1992,10 @@ async function handleSaveEvent(e) {
       } else {
         showToast("Evento guardado y actualizado en Google Calendar (sin correos de invitación).", true);
       }
-    } else if (ev.syncGoogle && state.accessToken) {
-      try {
-        const synced = await upsertGoogleCalendarEvent(ev);
-        ev.googleEventId = synced.id;
-        ev.googleCalId = state.googleCfg.primaryCalendarId || "primary";
-        saveEvents();
-        renderWeeks();
-        showToast("Evento guardado y enviado a Google Calendar (alertas activas)");
-      } catch (err) {
-        console.error(err);
-        showToast("Guardado localmente, pero falló envío a Google: " + err.message);
-      }
-    } else if (ev.syncGoogle && !state.accessToken) {
+    } else if (ev.syncGoogle) {
       const gcalUrl = buildGoogleCalendarTemplateUrl(ev);
       window.open(gcalUrl, "_blank", "noopener,noreferrer");
-      showToast("Evento guardado. Se abrió Google Calendar para enviar la alerta al grupo.");
+      showToast("Evento guardado. Se abrió Google Calendar para añadir la alerta.");
     } else {
       showToast("Evento guardado localmente.");
     }
@@ -2039,7 +2013,9 @@ async function handleDeleteEvent() {
   const ev = state.events.find((x) => x.id === id);
   if (!ev) return;
 
-  saveUndoSnapshot(`Eliminar "${ev.title}"`);
+  saveUndoAction(`Eliminar "${ev.title}"`, [
+    { id, before: eventContent(ev), after: null },
+  ]);
   state.events = state.events.filter((x) => x.id !== id);
   const op = APPS_SCRIPT_URL ? queueEventChange("delete", ev) : null;
   saveEvents();
@@ -2047,29 +2023,30 @@ async function handleDeleteEvent() {
   renderWeeks();
   showToast("Evento eliminado", true);
 
-  if (APPS_SCRIPT_URL) {
-    if (op) await sendQueuedOperation(op);
-  } else if (ev.googleEventId && state.accessToken) {
-    try {
-      const calId = encodeURIComponent(ev.googleCalId || "primary");
-      await gFetch(`https://www.googleapis.com/calendar/v3/calendars/${calId}/events/${ev.googleEventId}`, {
-        method: "DELETE",
-      });
-    } catch (err) {
-      console.warn("No se pudo eliminar en Google Calendar:", err);
-    }
+  if (APPS_SCRIPT_URL && op) {
+    await sendQueuedOperation(op);
   }
 }
 
 /* ---------- Gestión del Equipo y Correos ---------- */
+function persistTeamToServer() {
+  syncEpoch++;
+  saveTeam();
+  if (!APPS_SCRIPT_URL) return;
+  postToAppsScript({ action: "saveTeam", team: state.team }).then((res) => {
+    if (!res?.ok) {
+      showToast("Error guardando el equipo en Google. Reintenta en unos segundos.");
+    }
+  });
+}
+
 function moveTeamMember(fromIdx, toIdx) {
   if (fromIdx === toIdx) return;
   if (fromIdx < 0 || fromIdx >= state.team.length) return;
   if (toIdx < 0 || toIdx >= state.team.length) return;
   const [moved] = state.team.splice(fromIdx, 1);
   state.team.splice(toIdx, 0, moved);
-  saveTeam();
-  if (APPS_SCRIPT_URL) postToAppsScript({ action: "saveTeam", team: state.team });
+  persistTeamToServer();
   renderTeamList();
   renderLegendAndSelects();
   renderWeeks();
@@ -2147,9 +2124,14 @@ function renderTeamList() {
   list.querySelectorAll("input").forEach((inp) => {
     inp.onchange = () => {
       const idx = Number(inp.dataset.idx);
-      state.team[idx][inp.dataset.field] = inp.value.trim();
-      saveTeam();
-      if (APPS_SCRIPT_URL) postToAppsScript({ action: "saveTeam", team: state.team });
+      const val = inp.value.trim();
+      if (inp.dataset.field === "email" && val && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+        showToast("Formato de correo no válido");
+        inp.value = state.team[idx][inp.dataset.field] || "";
+        return;
+      }
+      state.team[idx][inp.dataset.field] = val;
+      persistTeamToServer();
       renderLegendAndSelects();
       renderWeeks();
     };
@@ -2166,9 +2148,17 @@ function renderTeamList() {
   list.querySelectorAll("[data-remove-member]").forEach((btn) => {
     btn.onclick = () => {
       const idx = Number(btn.dataset.removeMember);
+      const member = state.team[idx];
+      if (!member) return;
+      if (
+        !window.confirm(
+          `¿Eliminar a "${member.name}" del equipo? Sus eventos existentes no se borrarán pero dejarán de mostrarse en la tabla.`
+        )
+      ) {
+        return;
+      }
       state.team.splice(idx, 1);
-      saveTeam();
-      if (APPS_SCRIPT_URL) postToAppsScript({ action: "saveTeam", team: state.team });
+      persistTeamToServer();
       renderTeamList();
       renderLegendAndSelects();
       renderWeeks();
@@ -2176,45 +2166,10 @@ function renderTeamList() {
   });
 }
 
-/* ---------- Google Identity Services (OAuth 2.0 Client-Side, 0 €) ---------- */
-function initGoogleAuth() {
-  const clientId = state.googleCfg.clientId;
-  const clientInput = document.getElementById("googleClientIdInput");
-  const primaryInput = document.getElementById("primaryCalendarIdInput");
-  const vacInput = document.getElementById("vacationsSheetIdInput");
-  if (clientInput) clientInput.value = clientId || "";
-  if (primaryInput) primaryInput.value = state.googleCfg.primaryCalendarId || "primary";
-  if (vacInput) vacInput.value = state.googleCfg.vacationsSheetId || DEFAULT_VACATIONS_SHEET_ID;
-
-  if (!clientId) return;
-
-  if (window.google?.accounts?.oauth2) {
-    state.tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/spreadsheets.readonly",
-      callback: (resp) => {
-        if (resp.error) {
-          showToast("Error de autenticación Google: " + resp.error);
-          return;
-        }
-        state.accessToken = resp.access_token;
-        updateGoogleStatusUI(true);
-        showToast("Conectado a Google Workspace");
-        syncFromGoogleCalendars();
-      },
-    });
-  }
-}
-
+/* ---------- Enlace plantilla de Google Calendar (fallback sin Apps Script) ---------- */
 function buildGoogleCalendarTemplateUrl(ev) {
   const member = state.team.find((m) => m.id === ev.memberId);
   const ch = getChannel(ev.channelId);
-  const emails = [];
-  if (member?.email) emails.push(member.email);
-  (ev.groupAttendees || []).forEach((mId) => {
-    const gm = state.team.find((m) => m.id === mId);
-    if (gm?.email && !emails.includes(gm.email)) emails.push(gm.email);
-  });
 
   const dateCompact = ev.date.replace(/-/g, "");
   let datesParam;
@@ -2236,336 +2191,6 @@ function buildGoogleCalendarTemplateUrl(ev) {
   if (ev.location) params.set("location", ev.location);
   // Sin parámetro "add" (0 invitados): así se crea como evento propio del usuario y Google nunca añade Meet
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
-}
-
-function requestGoogleLogin() {
-  if (!state.googleCfg.clientId) {
-    document.getElementById("calendarsModal").showModal();
-    return;
-  }
-  if (!state.tokenClient) initGoogleAuth();
-  if (state.tokenClient) {
-    state.tokenClient.requestAccessToken({ prompt: state.accessToken ? "" : "consent" });
-  } else {
-    showToast("Cargando librería de Google... intenta en un segundo.");
-  }
-}
-
-function updateGoogleStatusUI(connected) {
-  if (connected && !state.syncTimer) {
-    state.syncTimer = setInterval(() => {
-      if (state.accessToken) syncFromGoogleCalendars(true);
-    }, 45000);
-  } else if (!connected && state.syncTimer) {
-    clearInterval(state.syncTimer);
-    state.syncTimer = null;
-  }
-}
-
-async function gFetch(url, options = {}) {
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${state.accessToken}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`HTTP ${res.status}: ${errText}`);
-  }
-  return res.status === 204 ? null : res.json();
-}
-
-async function upsertGoogleCalendarEvent(ev) {
-  const calId = encodeURIComponent(state.googleCfg.primaryCalendarId || "primary");
-  const member = state.team.find((m) => m.id === ev.memberId);
-  const ch = getChannel(ev.channelId);
-
-  // Solo se permite invitar a miembros del grupo (nunca a personas externas)
-  const allowedTeamEmails = new Set(
-    state.team.map((m) => (m.email || "").trim().toLowerCase()).filter(Boolean)
-  );
-  const attendees = [];
-  const pushGroupEmail = (email) => {
-    const clean = (email || "").trim().toLowerCase();
-    if (clean && allowedTeamEmails.has(clean) && !attendees.some((a) => a.email === clean)) {
-      attendees.push({ email: clean });
-    }
-  };
-
-  if (member?.email) pushGroupEmail(member.email);
-  (ev.groupAttendees || []).forEach((mId) => {
-    const gm = state.team.find((m) => m.id === mId);
-    if (gm?.email) pushGroupEmail(gm.email);
-  });
-
-  const overrides = [];
-  if (ev.popupMin !== "none") overrides.push({ method: "popup", minutes: Number(ev.popupMin) });
-  if (ev.emailMin !== "none") overrides.push({ method: "email", minutes: Number(ev.emailMin) });
-
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Madrid";
-  const body = {
-    summary: `[${ev.memberId}] ${ev.title}`,
-    location: ev.location || undefined,
-    description: `Canal: ${ch?.label || ev.channelId}\nAsignado a: ${member?.name || ev.memberId}\n\n${ev.notes || ""}`,
-    attendees: attendees.length ? attendees : undefined,
-    extendedProperties: {
-      shared: {
-        memberId: ev.memberId,
-        channelId: ev.channelId,
-        notes: ev.notes || "",
-      },
-    },
-    reminders: {
-      useDefault: false,
-      overrides,
-    },
-    start: ev.allDay
-      ? { date: ev.date }
-      : { dateTime: `${ev.date}T${ev.startTime || "09:00"}:00`, timeZone: tz },
-    end: ev.allDay
-      ? { date: toIsoDate(addDays(new Date(ev.date + "T00:00:00"), 1)) }
-      : { dateTime: `${ev.date}T${ev.endTime || "10:00"}:00`, timeZone: tz },
-  };
-
-  if (ev.googleEventId) {
-    return gFetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${calId}/events/${ev.googleEventId}?sendUpdates=all`,
-      { method: "PUT", body: JSON.stringify(body) }
-    );
-  }
-  return gFetch(
-    `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?sendUpdates=all`,
-    { method: "POST", body: JSON.stringify(body) }
-  );
-}
-
-async function syncFromGoogleCalendars(silent = false) {
-  if (!state.accessToken) return;
-  const baseMonday = getMonday(state.anchorDate);
-  const timeMin = baseMonday.toISOString();
-  const timeMax = addDays(baseMonday, 21).toISOString();
-
-  // 1) Sincronizar el calendario compartido del grupo (lectura/escritura colaborativa)
-  const sharedCalId = state.googleCfg.primaryCalendarId || "primary";
-  try {
-    const sharedUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(sharedCalId)}/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`;
-    const sharedData = await gFetch(sharedUrl);
-    const remoteEvents = (sharedData.items || [])
-      .map((item) => mapGoogleEventToLocal(item, sharedCalId))
-      .filter(Boolean);
-
-    // Conservar eventos locales de otras fechas o no sincronizados, y actualizar los del rango sincronizado
-    const minIso = toIsoDate(baseMonday);
-    const maxIso = toIsoDate(addDays(baseMonday, 21));
-    const keptLocal = state.events.filter(
-      (ev) => !ev.googleEventId && (ev.date < minIso || ev.date >= maxIso)
-    );
-    state.events = [...keptLocal, ...remoteEvents];
-    saveEvents();
-  } catch (err) {
-    console.warn("Error leyendo calendario compartido del grupo:", err.message);
-  }
-
-  // 2) No se leen calendarios personales del equipo para respetar su privacidad
-  state.externalEvents = [];
-
-  // 3) Sincronizar Festivos y Vacaciones desde el Google Sheet "Usuarios APP"
-  await syncVacationsAndHolidaysFromSheet(true);
-
-  renderWeeks();
-  if (!silent) {
-    showToast(`Sincronizado con el grupo (${state.events.length} eventos)`);
-  }
-}
-
-/* ---------- Lector de Google Sheet: FESTIVOS y VACACIONES (Usuarios APP) ---------- */
-function mapSheetUserToMemberId(raw) {
-  const s = String(raw || "").trim().toLowerCase();
-  if (!s) return null;
-  if (s === "tm" || s.includes("tomás") || s.includes("tomas")) return "TM1";
-  if (s === "ts" || s.includes("fabio")) return "TS1";
-  if (s === "tn" || s.includes("hamza")) return "TN1";
-  if (s === "tb" || s.includes("carles")) return "TB1";
-  if (s === "tl" || s.includes("francisco")) return "TL1";
-  if (s.includes("coordinator") || s === "coord" || s.includes("victor") || s.includes("víctor")) return "COORD";
-  if (s.includes("creator") || s.includes("david")) return "David";
-  const exact = state.team.find((m) => m.id.toLowerCase() === s || m.name.toLowerCase() === s);
-  return exact ? exact.id : null;
-}
-
-function parseShortDateToken(token, defaultYear = 2026) {
-  const m = String(token || "").trim().match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
-  if (!m) return null;
-  const day = Number(m[1]);
-  const month = Number(m[2]);
-  let year = defaultYear;
-  if (m[3]) {
-    year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
-  }
-  return new Date(year, month - 1, day);
-}
-
-async function fetchSheetValues(sheetId, sheetName) {
-  if (state.accessToken) {
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(sheetName + "!A1:R500")}`;
-    const data = await gFetch(url);
-    return data.values || [];
-  }
-  // Fallback sin login si la hoja está compartida con el enlace
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
-  const res = await fetch(csvUrl);
-  if (!res.ok) throw new Error("Hoja privada: conecta Google arriba para leerla.");
-  const text = await res.text();
-  if (text.trim().startsWith("<!DOCTYPE") || text.includes("accounts.google.com")) {
-    throw new Error("Hoja privada: conecta Google arriba para leerla.");
-  }
-  return parseCsvRows(text);
-}
-
-function parseCsvRows(csv) {
-  return csv
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      const out = [];
-      let cur = "";
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') {
-          if (inQuotes && line[i + 1] === '"') {
-            cur += '"';
-            i++;
-          } else {
-            inQuotes = !inQuotes;
-          }
-        } else if (ch === "," && !inQuotes) {
-          out.push(cur);
-          cur = "";
-        } else {
-          cur += ch;
-        }
-      }
-      out.push(cur);
-      return out;
-    });
-}
-
-async function syncVacationsAndHolidaysFromSheet(silent = false) {
-  const sheetId = (
-    document.getElementById("vacationsSheetIdInput")?.value ||
-    state.googleCfg.vacationsSheetId ||
-    DEFAULT_VACATIONS_SHEET_ID
-  ).trim();
-  if (!sheetId) {
-    if (!silent) showToast("Indica el ID del Google Sheet de Festivos y Vacaciones.");
-    return;
-  }
-
-  const nextBlocked = {};
-  let festivosCount = 0;
-  let vacacionesCount = 0;
-
-  try {
-    // 1. Pestaña FESTIVOS (Usuario, Nombre, Sede, FESTIVO 1..15 en formato DD/MM)
-    const festRows = await fetchSheetValues(sheetId, "FESTIVOS");
-    for (let r = 1; r < festRows.length; r++) {
-      const row = festRows[r];
-      const memberId = mapSheetUserToMemberId(row[0]) || mapSheetUserToMemberId(row[1]);
-      if (!memberId) continue;
-      for (let c = 3; c < row.length; c++) {
-        const cell = row[c];
-        if (!cell) continue;
-        [2026, 2027].forEach((yr) => {
-          const dt = parseShortDateToken(cell, yr);
-          if (!dt || Number.isNaN(dt.getTime())) return;
-          const iso = toIsoDate(dt);
-          nextBlocked[`${memberId}|${iso}`] = { type: "FESTIVO", label: "FESTIVO" };
-          festivosCount++;
-        });
-      }
-    }
-
-    // 2. Pestaña VACACIONES (DATA, Trainer, FECHA, MES, OPCIÓN, Estado, DÍAS, ID)
-    const vacRows = await fetchSheetValues(sheetId, "VACACIONES");
-    for (let r = 1; r < vacRows.length; r++) {
-      const row = vacRows[r];
-      const estado = String(row[5] || "").trim().toLowerCase();
-      if (estado !== "aprobado") continue;
-
-      const memberId = mapSheetUserToMemberId(row[1]);
-      if (!memberId) continue;
-
-      const fechaTxt = String(row[2] || "").trim();
-      const opcion = String(row[4] || "Vacaciones").trim().toUpperCase();
-      const label = opcion.includes("EXTRA") ? "DÍA EXTRA" : "VACACIONES";
-
-      // Rango: "Del 21/12/26 al 31/12/26"
-      const rangeMatch = fechaTxt.match(/del\s+(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s+al\s+(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/i);
-      if (rangeMatch) {
-        const startDt = parseShortDateToken(rangeMatch[1], 2026);
-        const endDt = parseShortDateToken(rangeMatch[2], 2026);
-        if (startDt && endDt && startDt <= endDt) {
-          let cur = new Date(startDt);
-          let guard = 0;
-          while (cur <= endDt && guard++ < 90) {
-            nextBlocked[`${memberId}|${toIsoDate(cur)}`] = { type: label, label };
-            vacacionesCount++;
-            cur = addDays(cur, 1);
-          }
-        }
-      } else {
-        // Día suelto: "Día 23/12/26"
-        const singleDt = parseShortDateToken(fechaTxt, 2026);
-        if (singleDt && !Number.isNaN(singleDt.getTime())) {
-          nextBlocked[`${memberId}|${toIsoDate(singleDt)}`] = { type: label, label };
-          vacacionesCount++;
-        }
-      }
-    }
-
-    state.blockedDays = nextBlocked;
-    saveBlockedDays();
-    renderWeeks();
-    if (!silent) {
-      showToast(`Festivos (${festivosCount}) y Vacaciones (${vacacionesCount} días) bloqueados`);
-    }
-  } catch (err) {
-    console.warn("Error leyendo Google Sheet de Festivos/Vacaciones:", err);
-    if (!silent) {
-      showToast("No se pudo leer el Sheet de Festivos/Vacaciones: " + err.message);
-    }
-  }
-}
-
-function mapGoogleEventToLocal(item, calId) {
-  const startStr = item.start?.date || item.start?.dateTime;
-  if (!startStr) return null;
-  const props = item.extendedProperties?.shared || {};
-  const rawSummary = item.summary || "(Sin título)";
-  const roleMatch = rawSummary.match(/^\[([^\]]+)\]\s*(.*)$/);
-  const inferredMember = roleMatch && state.team.some((m) => m.id === roleMatch[1]) ? roleMatch[1] : null;
-
-  return {
-    id: `g-${item.id}`,
-    googleEventId: item.id,
-    googleCalId: calId,
-    title: roleMatch ? roleMatch[2] : rawSummary,
-    memberId: props.memberId || inferredMember || state.team[0]?.id || "COORD",
-    channelId: props.channelId || "otros",
-    date: startStr.slice(0, 10),
-    allDay: Boolean(item.start?.date),
-    startTime: item.start?.dateTime ? item.start.dateTime.slice(11, 16) : "09:00",
-    endTime: item.end?.dateTime ? item.end.dateTime.slice(11, 16) : "10:00",
-    location: item.location || "",
-    notes: props.notes || "",
-    popupMin: "60",
-    emailMin: "1440",
-    syncGoogle: true,
-  };
 }
 
 /* ---------- Exportación .ICS ---------- */
@@ -2617,7 +2242,9 @@ function buildICS(events) {
     lines.push(`UID:${ev.id}@calendario-training`);
     lines.push(`DTSTAMP:${dtStamp}`);
     if (ev.allDay) {
+      const nextDayCompact = toIsoDate(addDays(new Date(ev.date + "T00:00:00"), 1)).replace(/-/g, "");
       lines.push(`DTSTART;VALUE=DATE:${dateCompact}`);
+      lines.push(`DTEND;VALUE=DATE:${nextDayCompact}`);
     } else {
       const s = (normalizeTimeStr(ev.startTime, "09:00") || "09:00").replace(":", "") + "00";
       const e = (normalizeTimeStr(ev.endTime, "10:00") || "10:00").replace(":", "") + "00";
@@ -2653,44 +2280,14 @@ function exportICS(scope = "view") {
   const icsText = buildICS(list);
   const blob = new Blob([icsText], { type: "text/calendar;charset=utf-8" });
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  a.href = url;
   a.download = scope === "all" ? "calendario-training-completo.ics" : "calendario-training-vista.ics";
   a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
   showToast(
     `Exportados ${list.length} evento(s) (${scope === "all" ? "todo el calendario" : "vista actual"}).`
   );
-}
-
-function handleIcsImport(file) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    const text = String(reader.result || "");
-    const blocks = text.split("BEGIN:VEVENT").slice(1);
-    let count = 0;
-    blocks.forEach((b) => {
-      const summary = (b.match(/SUMMARY[^:]*:(.*)/) || [])[1]?.trim();
-      const dtstart = (b.match(/DTSTART[^:]*:(\d{8})(T(\d{4}))?/) || []);
-      if (!summary || !dtstart[1]) return;
-      const rawDate = dtstart[1];
-      const date = `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`;
-      const startTime = dtstart[3] ? `${dtstart[3].slice(0, 2)}:${dtstart[3].slice(2, 4)}` : "09:00";
-      state.externalEvents.push({
-        id: `ics-${Date.now()}-${count++}`,
-        title: summary,
-        memberId: state.team[0]?.id || "COORD",
-        channelId: "otros",
-        customColor: "#475569",
-        date,
-        allDay: !dtstart[3],
-        startTime,
-        isExternal: true,
-        sourceName: "ICS",
-      });
-    });
-    renderWeeks();
-    showToast(`Importados ${count} eventos desde el archivo .ICS`);
-  };
-  reader.readAsText(file);
 }
 
 function escapeHtml(str) {
@@ -2827,7 +2424,6 @@ document.addEventListener("DOMContentLoaded", () => {
   renderLegendAndSelects();
   populateDateSelectors();
   renderWeeks();
-  initGoogleAuth();
 
   // Acciones directas desde el widget de Xiaomi (?action=new&member=... o ?editEvent=...)
   const initParams = new URLSearchParams(window.location.search);
@@ -2873,14 +2469,21 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   setTimeout(checkForAppUpdate, 500);
-  setInterval(checkForAppUpdate, 30000);
-  document.addEventListener("visibilitychange", () => {
+  setInterval(() => {
     if (document.visibilityState === "visible") checkForAppUpdate();
+  }, 30000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      checkForAppUpdate();
+      if (APPS_SCRIPT_URL) syncFromAppsScript(true);
+    }
   });
 
   if (APPS_SCRIPT_URL) {
     syncFromAppsScript(true);
-    setInterval(() => syncFromAppsScript(true), 20000);
+    setInterval(() => {
+      if (document.visibilityState === "visible") syncFromAppsScript(true);
+    }, 45000);
   }
 
   document.getElementById("btnPrevWeek").onclick = () => {
@@ -2954,9 +2557,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  document.getElementById("evMember").onchange = (e) => {
-    renderGroupAttendeeChips(e.target.value, []);
-  };
   document.getElementById("btnCopyEvent").onclick = () => {
     const currentId = document.getElementById("evId").value;
     if (!currentId) return;
@@ -3077,32 +2677,36 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("teamModal").showModal();
   };
 
-  document.getElementById("addMemberForm").onsubmit = (e) => {
+  document.getElementById("addMemberForm").onsubmit = async (e) => {
     e.preventDefault();
     const name = document.getElementById("newMemberId").value.trim();
     const email = document.getElementById("newMemberEmail").value.trim();
     if (!name) return;
-    state.team.push({ id: name, name, email });
+    const newMember = { id: name, name, email };
+    const existingIdx = state.team.findIndex((m) => m.id.toLowerCase() === name.toLowerCase());
+    if (existingIdx >= 0) state.team[existingIdx] = newMember;
+    else state.team.push(newMember);
+    syncEpoch++;
     saveTeam();
-    if (APPS_SCRIPT_URL) postToAppsScript({ action: "saveTeam", team: state.team });
     e.target.reset();
     renderTeamList();
     renderLegendAndSelects();
     renderWeeks();
+    if (APPS_SCRIPT_URL) {
+      const res = await postToAppsScript({ action: "addTeamMember", member: newMember });
+      if (res?.ok && Array.isArray(res.team) && res.team.length > 0) {
+        state.team = res.team;
+        saveTeam();
+        renderTeamList();
+        renderLegendAndSelects();
+        renderWeeks();
+        showToast(`Usuario "${name}" guardado de forma permanente para todo el equipo.`);
+      } else if (!res?.ok) {
+        showToast("Error guardando el nuevo usuario en Google. Reintenta.");
+      }
+    }
   };
 
-  document.getElementById("btnSaveGoogleConfig").onclick = () => {
-    state.googleCfg.clientId = document.getElementById("googleClientIdInput").value.trim();
-    state.googleCfg.primaryCalendarId = document.getElementById("primaryCalendarIdInput").value.trim() || "primary";
-    state.googleCfg.vacationsSheetId =
-      document.getElementById("vacationsSheetIdInput")?.value.trim() || DEFAULT_VACATIONS_SHEET_ID;
-    saveGoogleCfg();
-    initGoogleAuth();
-    requestGoogleLogin();
-  };
-
-  document.getElementById("btnSyncVacationsSheet").onclick = () => syncVacationsAndHolidaysFromSheet(false);
-  document.getElementById("btnSyncNow").onclick = () => syncFromGoogleCalendars(false);
   document.getElementById("btnExportIcs").onclick = () => exportICS("view");
   document.getElementById("btnExportIcsAll").onclick = () => exportICS("all");
   document.getElementById("btnRetryAllSync").onclick = retryAllChanges;

@@ -11,9 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Calendario Training" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ff6900" />
-  <link rel="stylesheet" href="styles.css?v=71" />
-  <!-- Google Identity Services (OAuth 2.0 sin servidor) -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <link rel="stylesheet" href="styles.css?v=73" />
 </head>
 <body>
   <header class="topbar">
@@ -100,7 +98,7 @@
     <form id="eventForm" class="modal-card">
       <div class="modal-header">
         <h2 id="eventModalTitle">Nuevo evento</h2>
-        <button type="button" class="btn-icon" data-close="eventModal">✕</button>
+        <button type="button" class="btn-icon" data-close="eventModal" aria-label="Cerrar">✕</button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="evId" />
@@ -233,11 +231,11 @@
     <div class="modal-card modal-wide">
       <div class="modal-header">
         <h2>👥 Equipo de Trabajo y Cuentas de Correo</h2>
-        <button type="button" class="btn-icon" data-close="teamModal">✕</button>
+        <button type="button" class="btn-icon" data-close="teamModal" aria-label="Cerrar">✕</button>
       </div>
       <div class="modal-body">
         <p class="help-text">
-          Asocia el correo de Google Workspace / Gmail de cada miembro. Al asignarles un evento, recibirán invitación y alertas automáticas en su móvil y PC.
+          Asocia el correo de cada miembro para sincronizar sus actividades en Google Calendar (sin correos de invitación a cuentas Google) y cruzar automáticamente sus festivos y vacaciones.
         </p>
         <div id="teamList" class="team-list"></div>
         <form id="addMemberForm" class="add-member-form">
@@ -252,64 +250,12 @@
     </div>
   </dialog>
 
-  <!-- Modal: Configuración Google Workspace (Envío directo de alertas y Vacaciones) -->
-  <dialog id="calendarsModal" class="modal">
-    <div class="modal-card modal-wide">
-      <div class="modal-header">
-        <h2>⚙ Conexión Google Workspace</h2>
-        <button type="button" class="btn-icon" data-close="calendarsModal">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="config-section">
-          <h3>1. Credencial gratuita de Google Workspace (Sin servidor · 0 €)</h3>
-          <p class="help-text">
-            Pega aquí el <strong>OAuth 2.0 Client ID</strong> del equipo. Los eventos que crees se enviarán directamente al correo de cada persona para generar alertas en móvil y PC, sin leer ni interferir en su calendario personal.
-          </p>
-          <details class="setup-steps-box">
-            <summary>¿Cómo conseguir el Client ID gratis en 3 minutos?</summary>
-            <ol>
-              <li>Entra en <strong>console.cloud.google.com</strong> con tu cuenta de Google Workspace y crea un proyecto (0 €, sin tarjeta).</li>
-              <li>En <strong>APIs y servicios → Biblioteca</strong>, habilita <strong>Google Calendar API</strong> y <strong>Google Sheets API</strong>.</li>
-              <li>En <strong>Pantalla de consentimiento de OAuth</strong>, elige tipo <strong>Interno</strong> (mismo dominio) o añade los correos del grupo.</li>
-              <li>En <strong>Credenciales → Crear credenciales → ID de cliente de OAuth</strong>, elige <strong>Aplicación web</strong> y añade la URL de este calendario en <em>Orígenes de JavaScript autorizados</em>.</li>
-              <li>Copia el código que termina en <code>.apps.googleusercontent.com</code>, pégalo abajo y pulsa <strong>Guardar y Conectar</strong>.</li>
-            </ol>
-          </details>
-          <div class="inline-form">
-            <input type="text" id="googleClientIdInput" placeholder="1234567890-abcdefg.apps.googleusercontent.com" />
-            <button type="button" id="btnSaveGoogleConfig" class="btn btn-primary">Guardar y Conectar</button>
-          </div>
-          <label class="mt-8">Calendario compartido del grupo (Training):
-            <input type="text" id="primaryCalendarIdInput" value="primary" placeholder="primary o ID del calendario compartido" />
-          </label>
-        </div>
-
-        <hr class="divider" />
-
-        <div class="config-section">
-          <h3>2. Hoja de Festivos y Vacaciones (Usuarios APP)</h3>
-          <p class="help-text">
-            Lee las pestañas <code>FESTIVOS</code> y <code>VACACIONES</code> (solo <em>Aprobado</em>) para mostrar festivos y bloquear días de vacaciones automáticamente.
-          </p>
-          <div class="inline-form">
-            <input type="text" id="vacationsSheetIdInput" value="1K0vGOPwteG6ZjNVT7cDaEwIeb3ONcjmNec3-FGlH10g" placeholder="ID del Google Sheet de Festivos/Vacaciones" />
-            <button type="button" id="btnSyncVacationsSheet" class="btn btn-secondary">🔄 Leer Festivos/Vacaciones</button>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" id="btnSyncNow" class="btn btn-secondary">🔄 Sincronizar ahora</button>
-        <button type="button" class="btn btn-primary" data-close="calendarsModal">Cerrar</button>
-      </div>
-    </div>
-  </dialog>
-
   <!-- Modal: Confirmar acción al soltar evento (Copiar / Sustituir / Mover) -->
   <dialog id="dropActionModal" class="modal modal-compact">
     <div class="modal-card">
       <div class="modal-header">
         <h2>¿Qué deseas hacer con el evento?</h2>
-        <button type="button" class="btn-icon" data-close="dropActionModal">✕</button>
+        <button type="button" class="btn-icon" data-close="dropActionModal" aria-label="Cerrar">✕</button>
       </div>
       <div class="modal-body">
         <p id="dropActionSummary" class="help-text"></p>
@@ -358,6 +304,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=71"></script>
+  <script src="app.js?v=73"></script>
 </body>
 </html>
